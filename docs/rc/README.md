@@ -49,6 +49,7 @@
 
 - [RC 验收清单](rc-1-acceptance.md)
 - [双人测试矩阵](rc-1-test-matrix.md)
+- [无外部测试站时的本机 NewAPI 夹具](local-newapi-fixture.md)
 - [问题反馈模板](rc-1-feedback-template.md)
 - [问题台账](rc-1-findings.md)
 - [发布记录](rc-1-release-record.md)

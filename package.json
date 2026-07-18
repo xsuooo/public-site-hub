@@ -9,6 +9,7 @@
     "build": "node scripts/build-extension.js",
     "verify:package": "node scripts/verify-package.js",
     "verify:runtime": "node scripts/smoke-extension.js",
+    "rc:fixture": "node scripts/rc-fixture-server.js",
     "release:artifact": "node scripts/package-release.js"
   }
 }
