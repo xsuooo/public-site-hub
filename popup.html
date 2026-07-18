@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>公益站收藏</title>
+  <link rel="stylesheet" href="shared-ui.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="popup-shell" aria-label="公益站收藏">
+    <header class="popup-header">
+      <div class="brand">
+        <img class="brand-logo" src="icons/logo.svg" alt="" width="34" height="34">
+        <div class="brand-copy">
+          <h1 class="brand-title">公益站收藏</h1>
+          <p class="brand-subtitle" id="overviewSubline">站点、接口地址与 Key 都在这里</p>
+          <span class="visually-hidden" id="overviewTitle">已收藏 0 个站点</span>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="openOptions2" title="管理收藏">
+        <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h10"/>
+        </svg>
+        管理收藏
+      </button>
+    </header>
+
+    <section class="popup-action-row" aria-label="主要操作">
+      <div class="split-button menu-root">
+        <button type="button" id="saveCurrent" class="btn btn-primary" title="自动识别站点并导入 Key">收藏当前页</button>
+        <button type="button" id="saveCategoryTrigger" class="btn btn-primary" aria-label="收藏分类：公益站" title="当前分类：公益站" aria-expanded="false" aria-controls="saveCategoryMenu">
+          <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+        </button>
+        <div class="popover save-category-menu" id="saveCategoryMenu" role="menu" aria-label="收藏分类" hidden>
+          <div class="save-category-label" role="presentation">收藏分类</div>
+          <button class="menu-item" type="button" role="menuitemradio" aria-checked="true" data-save-category="gongyi">
+            <span>公益站</span>
+          </button>
+          <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-save-category="relay">
+            <span>中转站</span>
+          </button>
+        </div>
+        <select id="saveCategory" class="select save-category-select" aria-hidden="true" tabindex="-1" hidden>
+          <option value="gongyi">公益站</option>
+          <option value="relay">中转站</option>
+        </select>
+      </div>
+
+      <button type="button" id="refreshBalances" class="btn" title="刷新全部余额">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+        刷新余额
+      </button>
+
+      <div class="quick-tools-root menu-root">
+        <button type="button" class="icon-btn" id="quickToolsTrigger" aria-label="余额失败站操作" aria-expanded="false" aria-controls="quickTools" hidden>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+        </button>
+        <div class="popover quick-tools" id="quickTools" role="menu" hidden>
+          <button type="button" class="menu-item" id="popupRetryFailed" role="menuitem">重试余额失败站</button>
+          <button type="button" class="menu-item" id="popupOpenFailed" role="menuitem">打开失败站</button>
+          <button type="button" class="menu-item" id="popupOpenLoginFailed" role="menuitem">打开未登录站</button>
+        </div>
+      </div>
+    </section>
+
+    <nav class="health-strip" id="healthSummary" aria-label="按健康状态筛选">
+      <button class="health-link" type="button" aria-pressed="true" data-health="all">全部 <strong id="listScope">0</strong></button>
+      <button class="health-link" type="button" aria-pressed="false" data-tone="success" data-health="healthy">正常 <strong id="healthyCount">0</strong></button>
+      <button class="health-link" type="button" aria-pressed="false" data-tone="warning" data-health="needsAttention">需处理 <strong id="attentionCount">0</strong></button>
+      <button class="health-link" type="button" aria-pressed="false" data-tone="danger" data-health="failed">失败 <strong id="failedCount">0</strong></button>
+    </nav>
+
+    <section class="popup-filter-row" aria-label="站点筛选">
+      <div class="segmented" id="categoryFilter" role="group" aria-label="分类筛选">
+        <button type="button" aria-pressed="true" data-cat="all">全部</button>
+        <button type="button" aria-pressed="false" data-cat="gongyi">公益</button>
+        <button type="button" aria-pressed="false" data-cat="relay">中转</button>
+      </div>
+
+      <div class="tag-menu-root menu-root">
+        <button class="btn tag-filter" id="tagFilterTrigger" type="button" aria-expanded="false" aria-controls="tagFilter">
+          <span id="tagFilterLabel">标签</span>
+          <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+        </button>
+        <div class="popover tag-popover" id="tagFilter" role="menu" aria-label="标签筛选" hidden></div>
+      </div>
+
+      <label class="popup-search-wrap">
+        <span class="visually-hidden">搜索名称、域名、备注或标签</span>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+        <input class="input popup-search" id="search" type="search" aria-label="搜索名称、域名、备注或标签" placeholder="搜索名称、域名、备注或标签" autocomplete="off">
+      </label>
+    </section>
+
+    <section class="list-region" aria-labelledby="siteListTitle">
+      <h2 class="visually-hidden" id="siteListTitle">收藏站点</h2>
+      <div class="balance-progress progress-strip" id="balanceProgress" hidden role="region" aria-label="余额刷新进度" aria-describedby="balanceProgressText balanceProgressCount" tabindex="-1">
+        <span id="balanceProgressText" role="status" aria-live="polite" aria-atomic="true">准备刷新余额</span>
+        <progress id="balanceProgressBar" max="1" value="0" aria-label="余额刷新进度" aria-busy="false"></progress>
+        <div class="progress-strip-actions">
+          <strong id="balanceProgressCount"></strong>
+          <button type="button" class="btn btn-sm progress-stop" id="stopBalanceRefresh" title="当前站点处理完成后停止" hidden>停止</button>
+        </div>
+      </div>
+      <div class="toast-row" id="toastRow">
+        <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+        <button type="button" class="btn btn-sm" id="toastAction" hidden></button>
+      </div>
+      <div class="list site-list" id="list" aria-label="全部收藏站点"></div>
+    </section>
+  </main>
+
+  <dialog class="dialog" id="deleteDialog" aria-labelledby="deleteDialogTitle" aria-describedby="deleteDialogCopy">
+    <form method="dialog">
+      <div class="dialog-header">
+        <span class="dialog-mark" aria-hidden="true">
+          <svg class="icon icon-lg" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 4.7 3.8 16a2 2 0 0 0 1.7 3h13a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/></svg>
+        </span>
+        <div>
+          <h2 id="deleteDialogTitle">删除站点？</h2>
+          <p id="deleteDialogCopy">该站点及其 Key 将一并删除，无法撤销。</p>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button type="submit" class="btn" id="cancelDelete" value="cancel">取消</button>
+        <button type="submit" class="btn btn-danger" id="confirmDelete" value="confirm">删除站点</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="keyCreateDialog" aria-labelledby="keyCreateDialogTitle" aria-describedby="keyCreateDialogCopy">
+    <form method="dialog">
+      <div class="dialog-header">
+        <span class="dialog-mark dialog-mark-warning" aria-hidden="true">
+          <svg class="icon icon-lg" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8m-3 3 2 2m-5 1 2 2"/></svg>
+        </span>
+        <div>
+          <h2 id="keyCreateDialogTitle">创建新 Key？</h2>
+          <p id="keyCreateDialogCopy">未发现可用 Key。确认后将在该站创建一把新 Key，并仅保存到本机。</p>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button type="submit" class="btn" id="cancelKeyCreate" value="cancel">取消</button>
+        <button type="submit" class="btn btn-primary" id="confirmKeyCreate" value="confirm">创建并保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="site-utils.js"></script>
+  <script src="permissions.js"></script>
+  <script src="ui-runtime.js"></script>
+  <script src="balance-format.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

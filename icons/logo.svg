@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="公益站收藏">
+  <rect width="128" height="128" rx="30" fill="#4F46E5"/>
+  <path d="M36 28h56a9 9 0 0 1 9 9v64l-37-20-37 20V37a9 9 0 0 1 9-9Z" fill="#fff"/>
+  <path d="M50 51h28M50 66h20" fill="none" stroke="#4F46E5" stroke-width="7" stroke-linecap="round"/>
+  <path d="m92 22 3.8 9.2L105 35l-9.2 3.8L92 48l-3.8-9.2L79 35l9.2-3.8Z" fill="#FBBF24"/>
+</svg>

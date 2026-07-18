@@ -1,0 +1,31 @@
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+.nyc_output/
+
+# Local design inputs and temporary artifacts
+uploads/
+tmp/
+temp/
+test-results/
+playwright-report/
+.playwright/
+release-artifacts/
+
+# Release packages are generated from a tagged commit
+*.zip
+*.sha256
+*.crx
+
+# Credentials and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and operating-system files
+*.log
+Thumbs.db
+.DS_Store

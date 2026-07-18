@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>公益站收藏 · 设置页重构概念</title>
+  <link rel="stylesheet" href="concept.css">
+</head>
+<body class="options-concept-page" data-page="options" data-theme="light">
+  <div class="concept-toolbar" aria-label="概念预览控制">
+    <strong>Options 概念</strong>
+    <button class="btn btn-sm" type="button" data-workspace-switch="sites">站点管理</button>
+    <button class="btn btn-sm" type="button" data-workspace-switch="import">导入与备份</button>
+    <button class="btn btn-sm" type="button" data-workspace-switch="diagnostics">诊断与权限</button>
+    <button class="btn btn-sm" type="button" data-drawer-toggle>编辑抽屉</button>
+    <button class="btn btn-sm" type="button" data-dialog-toggle="replace">替换确认</button>
+    <button class="btn btn-sm" type="button" data-concept-theme="light">浅色</button>
+    <button class="btn btn-sm" type="button" data-concept-theme="dark">深色</button>
+  </div>
+
+  <div class="options-shell">
+    <header class="options-topbar">
+      <div class="brand">
+        <img class="brand-logo" src="../../../icons/logo.svg" alt="">
+        <div class="brand-copy">
+          <h1 class="brand-title">公益站收藏</h1>
+          <p class="brand-subtitle">站点、接口地址、Key 与余额均保存在本机</p>
+        </div>
+      </div>
+      <div class="options-topbar-actions">
+        <button class="btn" type="button" data-feedback="正在刷新">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+          <span>刷新全部余额</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="options-layout">
+      <nav class="workspace-nav" aria-label="设置工作区">
+        <p class="nav-label">工作区</p>
+        <button class="nav-item" type="button" aria-current="page" data-workspace-switch="sites">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>
+          站点管理
+          <span class="nav-meta">12</span>
+        </button>
+        <button class="nav-item" type="button" data-workspace-switch="import">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+          导入与备份
+          <span class="nav-meta">3</span>
+        </button>
+        <button class="nav-item" type="button" data-workspace-switch="diagnostics">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg>
+          诊断与权限
+          <span class="nav-meta">2</span>
+        </button>
+        <p class="privacy-note">所有站点与 Key 只保存在浏览器本机。本页面不连接遥测或分析服务。</p>
+      </nav>
+
+      <main class="workspace-main">
+        <section class="workspace" data-workspace="sites">
+          <header class="workspace-header">
+            <div>
+              <h2 class="workspace-title">站点管理</h2>
+              <p class="workspace-description">管理 12 个收藏站点、缓存余额和可选 API Key。</p>
+            </div>
+            <div class="workspace-actions">
+              <button class="btn" type="button" data-drawer-open="batch">批量添加</button>
+              <button class="btn btn-primary" type="button" data-drawer-open="add">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                添加站点
+              </button>
+            </div>
+          </header>
+
+          <div class="toolbar-row" aria-label="站点筛选与排序">
+            <label class="toolbar-search">
+              <span hidden>搜索收藏站点</span>
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+              <input class="input" type="search" aria-label="搜索收藏站点" placeholder="搜索名称、域名、备注或标签">
+            </label>
+            <select class="select" aria-label="分类筛选">
+              <option>全部分类</option>
+              <option>仅公益站</option>
+              <option>仅中转站</option>
+            </select>
+            <select class="select" aria-label="标签筛选">
+              <option>全部标签</option>
+              <option>常用</option>
+              <option>低价</option>
+              <option>Claude</option>
+            </select>
+            <select class="select" aria-label="站点排序">
+              <option>当前顺序</option>
+              <option>按名称</option>
+              <option>按最近更新</option>
+              <option>按健康状态</option>
+            </select>
+          </div>
+
+          <div class="bulk-toolbar" aria-label="批量操作">
+            <strong>已选 2 个站点</strong>
+            <button class="btn btn-sm" type="button">全选当前</button>
+            <button class="btn btn-sm" type="button">取消选择</button>
+            <button class="btn btn-danger-soft btn-sm" type="button" data-dialog-toggle="delete">删除所选</button>
+          </div>
+
+          <section class="panel" aria-label="站点列表">
+            <div class="data-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="check-col"><input class="row-check" type="checkbox" aria-label="全选当前结果"></th>
+                    <th class="site-col">站点</th>
+                    <th class="category-col">分类与标签</th>
+                    <th class="balance-col">缓存余额</th>
+                    <th class="key-col">Key</th>
+                    <th class="health-col">健康状态</th>
+                    <th class="actions-col"><span hidden>操作</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="check-col"><input class="row-check" type="checkbox" checked aria-label="选择星河公益站"></td>
+                    <td>
+                      <div class="table-site"><span class="site-favicon">星</span><span><strong>星河公益站</strong><small class="mono">api.starlight.invalid:8443</small></span></div>
+                    </td>
+                    <td><div class="table-tags"><span class="tag">公益站</span><span class="tag">#常用</span><span class="tag">#Claude</span></div></td>
+                    <td class="table-balance"><strong>$ 8.42</strong><small>2 小时前</small></td>
+                    <td><strong>2</strong><small class="data-label">1 个默认</small></td>
+                    <td><span class="status-pill" data-tone="success">正常</span></td>
+                    <td class="actions-col"><div class="row-actions"><button class="icon-btn" type="button" aria-label="编辑星河公益站" data-drawer-open="edit"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16zM14.5 6.3l3.2 3.2"/></svg></button><button class="icon-btn" type="button" aria-label="星河公益站更多操作"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+                  </tr>
+                  <tr>
+                    <td class="check-col"><input class="row-check" type="checkbox" checked aria-label="选择云帆中转"></td>
+                    <td><div class="table-site"><span class="site-favicon">云</span><span><strong>云帆中转</strong><small class="mono">api.cloudsail.invalid</small></span></div></td>
+                    <td><div class="table-tags"><span class="tag">中转站</span><span class="tag">#低价</span></div></td>
+                    <td class="table-balance"><strong>—</strong><small>登录已失效</small></td>
+                    <td><strong>1</strong><small class="data-label">完整 Key</small></td>
+                    <td><span class="status-pill" data-tone="danger">余额失败</span></td>
+                    <td class="actions-col"><div class="row-actions"><button class="icon-btn" type="button" aria-label="编辑云帆中转" data-drawer-open="edit"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16zM14.5 6.3l3.2 3.2"/></svg></button><button class="icon-btn" type="button" aria-label="云帆中转更多操作"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+                  </tr>
+                  <tr>
+                    <td class="check-col"><input class="row-check" type="checkbox" aria-label="选择 liWAN LAB"></td>
+                    <td><div class="table-site"><span class="site-favicon">L</span><span><strong>liWAN LAB</strong><small class="mono">api.liwan.invalid</small></span></div></td>
+                    <td><div class="table-tags"><span class="tag">公益站</span><span class="tag">#常用</span></div></td>
+                    <td class="table-balance"><strong>—</strong><small>尚未查询</small></td>
+                    <td><strong>可选</strong><small class="data-label">未配置</small></td>
+                    <td><span class="status-pill" data-tone="warning">需处理</span></td>
+                    <td class="actions-col"><div class="row-actions"><button class="icon-btn" type="button" aria-label="编辑 liWAN LAB" data-drawer-open="edit"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16zM14.5 6.3l3.2 3.2"/></svg></button><button class="icon-btn" type="button" aria-label="liWAN LAB 更多操作"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+                  </tr>
+                  <tr>
+                    <td class="check-col"><input class="row-check" type="checkbox" aria-label="选择 42 API"></td>
+                    <td><div class="table-site"><span class="site-favicon">42</span><span><strong>42 API</strong><small class="mono">api.fortytwo.invalid</small></span></div></td>
+                    <td><div class="table-tags"><span class="tag">中转站</span><span class="tag">#备用</span></div></td>
+                    <td class="table-balance"><strong>$ 3.18</strong><small>昨天</small></td>
+                    <td><strong>1</strong><small class="data-label">完整 Key</small></td>
+                    <td><span class="status-pill" data-tone="success">正常</span></td>
+                    <td class="actions-col"><div class="row-actions"><button class="icon-btn" type="button" aria-label="编辑 42 API" data-drawer-open="edit"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16zM14.5 6.3l3.2 3.2"/></svg></button><button class="icon-btn" type="button" aria-label="42 API 更多操作"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+                  </tr>
+                  <tr>
+                    <td class="check-col"><input class="row-check" type="checkbox" aria-label="选择青屿 ZenAPI"></td>
+                    <td><div class="table-site"><span class="site-favicon">青</span><span><strong>青屿 ZenAPI</strong><small class="mono">zen.greenisle.invalid</small></span></div></td>
+                    <td><div class="table-tags"><span class="tag">公益站</span><span class="tag">#测试</span></div></td>
+                    <td class="table-balance"><strong>$ 12.06</strong><small>刚刚</small></td>
+                    <td><strong>待修复</strong><small class="data-label">1 个掩码值</small></td>
+                    <td><span class="status-pill" data-tone="warning">Key 待修复</span></td>
+                    <td class="actions-col"><div class="row-actions"><button class="icon-btn" type="button" aria-label="编辑青屿 ZenAPI" data-drawer-open="edit"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16zM14.5 6.3l3.2 3.2"/></svg></button><button class="icon-btn" type="button" aria-label="青屿 ZenAPI 更多操作"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="panel-body responsive-site-list" aria-label="响应式站点卡片">
+              <article class="responsive-site-card">
+                <div class="site-card-header"><div class="table-site"><span class="site-favicon">星</span><span><strong>星河公益站</strong><small class="mono">api.starlight.invalid:8443</small></span></div><span class="status-pill" data-tone="success">正常</span></div>
+                <div class="table-tags"><span class="tag">公益站</span><span class="tag">#常用</span><span class="tag">#Claude</span></div>
+                <div class="site-card-data"><div class="table-balance"><strong>$ 8.42</strong><small>2 小时前</small></div><div class="key-summary"><span>默认 Key</span><strong class="mono">尾号 4821</strong></div></div>
+                <footer class="site-card-actions"><button class="btn btn-sm" type="button">复制接口地址</button><button class="btn btn-sm" type="button">复制 Key</button><button class="btn btn-sm" type="button" data-drawer-open="edit">编辑</button></footer>
+              </article>
+              <article class="responsive-site-card">
+                <div class="site-card-header"><div class="table-site"><span class="site-favicon">云</span><span><strong>云帆中转</strong><small class="mono">api.cloudsail.invalid</small></span></div><span class="status-pill" data-tone="danger">余额失败</span></div>
+                <div class="notice" data-tone="danger">登录状态已失效，重新授权后再查询余额。</div>
+                <footer class="site-card-actions"><button class="btn btn-soft btn-sm" type="button">重试并授权</button><button class="btn btn-sm" type="button">再查余额</button><button class="btn btn-sm" type="button" data-drawer-open="edit">编辑</button></footer>
+              </article>
+              <article class="responsive-site-card">
+                <div class="site-card-header"><div class="table-site"><span class="site-favicon">L</span><span><strong>liWAN LAB</strong><small class="mono">api.liwan.invalid</small></span></div><span class="status-pill" data-tone="warning">需处理</span></div>
+                <div class="site-card-data"><span>Key 可选 · 尚未查询余额</span><span class="tag">#常用</span></div>
+                <footer class="site-card-actions"><button class="btn btn-sm" type="button">复制接口地址</button><button class="btn btn-soft btn-sm" type="button">获取 Key</button><button class="btn btn-sm" type="button" data-drawer-open="edit">编辑</button></footer>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="workspace" data-workspace="import" hidden>
+          <header class="workspace-header">
+            <div>
+              <h2 class="workspace-title">导入与备份</h2>
+              <p class="workspace-description">先预览，再合并或替换；完整 Key 始终按敏感数据处理。</p>
+            </div>
+          </header>
+
+          <div class="two-column-workspace">
+            <section class="panel">
+              <header class="panel-header"><div><h3 class="panel-title">导入站点</h3><p class="panel-description">支持本扩展 JSON 与 All API Hub 格式。</p></div></header>
+              <div class="panel-body">
+                <div class="source-tabs" role="tablist" aria-label="导入来源">
+                  <button class="btn btn-sm" role="tab" type="button" aria-selected="true" data-import-source-button="file">选择文件</button>
+                  <button class="btn btn-sm" role="tab" type="button" aria-selected="false" data-import-source-button="paste">粘贴 JSON</button>
+                </div>
+                <label class="dropzone" for="concept-import-file" data-import-source="file">
+                  <input class="visually-hidden" id="concept-import-file" type="file" accept=".json,application/json">
+                  <div>
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14v5h14v-5"/></svg>
+                    <strong>已选择：公益站收藏-脱敏.json</strong>
+                    <span>脱敏文件只能恢复站点信息，不能恢复完整 Key</span>
+                  </div>
+                </label>
+                <label class="field paste-source" data-import-source="paste" hidden>
+                  <span>粘贴 JSON</span>
+                  <textarea class="textarea mono" rows="7" aria-label="粘贴导入 JSON" placeholder="在这里粘贴本扩展或 All API Hub JSON"></textarea>
+                </label>
+                <div class="preview-heading">
+                  <span class="status-pill" data-tone="success" data-preview-status>预览已完成</span>
+                  <span data-preview-copy>已检查 8 条传入记录</span>
+                  <button class="btn btn-ghost btn-sm" type="button" data-preview-toggle>重新预览</button>
+                </div>
+                <div class="preview-summary" aria-label="导入预览" data-preview-result>
+                  <div class="summary-cell"><span>当前站点</span><strong>12</strong></div>
+                  <div class="summary-cell"><span>传入</span><strong>8</strong></div>
+                  <div class="summary-cell"><span>新增</span><strong>4</strong></div>
+                  <div class="summary-cell"><span>更新</span><strong>3</strong></div>
+                  <div class="summary-cell"><span>跳过</span><strong>1</strong></div>
+                </div>
+                <div class="notice" data-tone="info" data-preview-result>
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg>
+                  <span>按完整 Origin 合并；显式端口不同的站点不会被错误覆盖。执行后预计共有 16 个站点。</span>
+                </div>
+                <div class="import-actions">
+                  <button class="btn" type="button" data-dialog-toggle="replace" data-import-action>替换导入</button>
+                  <button class="btn btn-primary" type="button" data-feedback="合并完成" data-import-action>合并导入</button>
+                </div>
+              </div>
+            </section>
+
+            <div class="stack">
+              <section class="panel">
+                <header class="panel-header"><div><h3 class="panel-title">导出</h3><p class="panel-description">根据用途选择安全级别。</p></div></header>
+                <div class="panel-body stack">
+                  <article class="export-choice">
+                    <div class="export-choice-header"><div><h3>导出（脱敏）</h3><p>适合分享站点列表，不能恢复凭据。</p></div><button class="btn btn-primary btn-sm" type="button" data-feedback="已生成脱敏导出">导出</button></div>
+                  </article>
+                  <article class="export-choice">
+                    <div class="export-choice-header"><div><h3>导出（含完整 Key）</h3><p>包含 9 个完整 Key，仅保存到可信位置。</p></div><button class="btn btn-danger-soft btn-sm" type="button" data-dialog-toggle="export">风险导出</button></div>
+                  </article>
+                </div>
+              </section>
+
+              <section class="panel">
+                <header class="panel-header"><div><h3 class="panel-title">恢复快照</h3><p class="panel-description">最多 3 份，保留 7 天。</p></div><button class="btn btn-ghost btn-sm" type="button" data-dialog-toggle="cleanup">清理</button></header>
+                <div class="panel-body snapshot-list">
+                  <div class="snapshot-row"><span><strong>今天 09:42</strong><small>12 个站点 · 9 个完整 Key</small></span><button class="btn btn-sm" type="button" data-dialog-toggle="restore">恢复</button></div>
+                  <div class="snapshot-row"><span><strong>昨天 21:18</strong><small>11 个站点 · 8 个完整 Key</small></span><button class="btn btn-sm" type="button" data-dialog-toggle="restore">恢复</button></div>
+                  <div class="snapshot-row"><span><strong>7 月 15 日</strong><small>10 个站点 · 8 个完整 Key</small></span><button class="btn btn-sm" type="button" data-dialog-toggle="restore">恢复</button></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="workspace" data-workspace="diagnostics" hidden>
+          <header class="workspace-header">
+            <div>
+              <h2 class="workspace-title">诊断与权限</h2>
+              <p class="workspace-description">只读检查本机状态，不上传站点、Key 或浏览器数据。</p>
+            </div>
+            <div class="workspace-actions">
+              <button class="btn" type="button" data-feedback="已复制脱敏诊断">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+                复制脱敏诊断
+              </button>
+              <button class="btn btn-primary" type="button" data-feedback="诊断已刷新">刷新</button>
+            </div>
+          </header>
+
+          <div class="summary-grid">
+            <article class="diagnostic-summary"><span>站点授权</span><strong>9 / 12</strong><small>3 个站点尚未授权</small></article>
+            <article class="diagnostic-summary"><span>余额状态</span><strong>8 正常</strong><small>1 失败 · 3 未查询</small></article>
+            <article class="diagnostic-summary"><span>Key 状态</span><strong>9 完整</strong><small>1 个掩码值待修复</small></article>
+          </div>
+
+          <section class="panel">
+            <header class="panel-header"><div><h3 class="panel-title">需要处理</h3><p class="panel-description">按风险排序，仅显示可以采取行动的问题。</p></div></header>
+            <div class="panel-body issue-list">
+              <article class="issue-row">
+                <span class="issue-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.7 3.8 16a2 2 0 0 0 1.7 3h13a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/></svg></span>
+                <div class="issue-copy"><strong>3 个站点尚未授权</strong><p>只申请对应 HTTPS Origin，不会自动查询余额或读取 Key。</p></div>
+                <div class="issue-actions"><button class="btn btn-soft btn-sm" type="button" data-feedback="正在请求授权">授权未授权站</button></div>
+              </article>
+              <article class="issue-row">
+                <span class="issue-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></span>
+                <div class="issue-copy"><strong>云帆中转余额查询失败</strong><p>登录状态已失效；可以先打开站点，再只重试余额失败的站点。</p></div>
+                <div class="issue-actions"><button class="btn btn-sm" type="button">打开失败站</button><button class="btn btn-sm" type="button">打开未登录站</button><button class="btn btn-soft btn-sm" type="button">重试余额失败</button></div>
+              </article>
+              <article class="issue-row">
+                <span class="issue-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10V8a4 4 0 0 1 8 0v2m-9 0h10v10H7z"/></svg></span>
+                <div class="issue-copy"><strong>1 个掩码 Key 需要修复</strong><p>掩码值不能复制或设为默认；请在对应站点编辑抽屉中替换或删除。</p></div>
+                <div class="issue-actions"><button class="btn btn-sm" type="button" data-drawer-open="edit">打开站点编辑</button></div>
+              </article>
+            </div>
+            <details class="technical-details">
+              <summary>技术详情</summary>
+              <pre class="mono">扩展版本: 1.0
+数据 schema: v4
+上次迁移: 2026-07-17 03:46:41
+余额任务: idle · scope=all · pending=0
+未授权 Origin: 3（已脱敏）</pre>
+            </details>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header"><div><h3 class="panel-title">高级设置</h3><p class="panel-description">高风险能力默认关闭。</p></div></header>
+            <div class="panel-body">
+              <div class="advanced-setting">
+                <div><strong>自动创建无限额度且永不过期 Key</strong><p>关闭时使用约 $10 / 90 天的默认安全策略。开启后创建的 Key 风险更高。</p></div>
+                <button class="switch" type="button" role="switch" aria-checked="false" aria-label="自动创建无限额度且永不过期 Key" data-dialog-toggle="create-key"></button>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="drawer-scrim" data-drawer-scrim hidden></div>
+  <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="concept-drawer-title" data-drawer hidden>
+    <header class="drawer-header">
+      <div><h2 id="concept-drawer-title" data-drawer-title>编辑站点</h2><p class="panel-description" data-drawer-subtitle>星河公益站 · NewAPI</p></div>
+      <button class="icon-btn" type="button" aria-label="关闭抽屉" data-drawer-close>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="drawer-body">
+      <form class="form-grid" data-drawer-form>
+        <div class="field span-2"><label for="concept-site-name">名称</label><input class="input" id="concept-site-name" value="星河公益站"></div>
+        <div class="field span-2"><label for="concept-site-origin" data-origin-label>站点 Origin</label><input class="input mono" id="concept-site-origin" value="https://api.starlight.invalid:8443"></div>
+        <div class="field span-2" data-drawer-add-only hidden><label for="concept-site-key">API Key（可选）</label><input class="input mono" id="concept-site-key" type="password" placeholder="可稍后补充完整 sk-…"></div>
+        <div class="field span-2"><label for="concept-site-base">Base URL</label><input class="input mono" id="concept-site-base" value="https://api.starlight.invalid:8443"></div>
+        <div class="field span-2"><label for="concept-site-page">控制台 / 页面 URL</label><input class="input mono" id="concept-site-page" value="https://api.starlight.invalid:8443/console"></div>
+        <div class="field"><label for="concept-site-category">分类</label><select class="select" id="concept-site-category"><option>公益站</option><option>中转站</option></select></div>
+        <div class="field"><label for="concept-site-type">架构类型</label><select class="select" id="concept-site-type"><option>自动</option><option selected>NewAPI</option><option>Sub2API</option><option>ZenAPI</option></select></div>
+        <div class="field span-2"><label for="concept-site-tags">标签</label><input class="input" id="concept-site-tags" value="常用, Claude"></div>
+        <div class="field span-2"><label for="concept-site-note">备注</label><textarea class="textarea" id="concept-site-note">稳定，适合日常调用。</textarea></div>
+      </form>
+
+      <section class="section-divider" data-drawer-add-only hidden>
+        <h3>识别预览</h3>
+        <p>先检查架构、Base URL 与识别信号，再决定识别并添加或直接添加。</p>
+        <div class="notice drawer-detection" data-tone="info"><span><strong>等待识别</strong><br>输入站点 URL 后可先执行“只识别”。</span></div>
+        <div class="drawer-inline-actions"><button class="btn" type="button" data-feedback="识别完成">只识别</button><button class="btn" type="button" data-feedback="已直接添加">直接添加</button></div>
+      </section>
+
+      <section class="batch-add" data-drawer-batch-only hidden>
+        <div class="field"><label for="concept-batch-sites">批量站点 URL</label><textarea class="textarea mono" id="concept-batch-sites" rows="10" placeholder="每行一个 URL，或使用逗号分隔"></textarea><p class="field-hint">逐条识别并展示成功或失败摘要，不会静默跳过。</p></div>
+      </section>
+
+      <div class="drawer-context-actions" data-drawer-edit-only>
+        <button class="btn" type="button" data-feedback="识别已更新">重新识别</button>
+        <button class="btn" type="button" data-feedback="正在查询">刷新余额</button>
+      </div>
+
+      <section class="section-divider" data-drawer-edit-only>
+        <h3>API Key</h3>
+        <p>普通界面只显示名称与尾号；复制时使用本机保存的完整值。</p>
+        <div class="key-list">
+          <article class="key-item"><span><strong>日常调用 <span class="tag">默认</span></strong><small class="mono">尾号 4821</small></span><span class="key-item-actions"><button class="btn btn-sm" type="button" data-feedback="已复制">复制</button><button class="icon-btn" type="button" aria-label="删除日常调用 Key"><svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v5m4-5v5M9 7l1-3h4l1 3m-9 0 1 13h10l1-13"/></svg></button></span></article>
+          <article class="key-item"><span><strong>备用 Key</strong><small class="mono">尾号 9910</small></span><span class="key-item-actions"><button class="btn btn-sm" type="button">设默认</button><button class="icon-btn" type="button" aria-label="删除备用 Key"><svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v5m4-5v5M9 7l1-3h4l1 3m-9 0 1 13h10l1-13"/></svg></button></span></article>
+          <article class="key-item"><span><strong>历史掩码 <span class="status-pill" data-tone="warning">待修复</span></strong><small class="mono">掩码值 · 尾号 4821</small></span><span class="key-item-actions"><button class="btn btn-danger-soft btn-sm" type="button">删除</button></span></article>
+        </div>
+      </section>
+
+      <section class="section-divider" data-drawer-edit-only>
+        <h3>添加 Key</h3>
+        <p>可以从页面导入，也可以手动粘贴明显完整的 <code>sk-</code> 值。</p>
+        <div class="form-grid">
+          <div class="field"><label for="concept-key-name">名称</label><input class="input" id="concept-key-name" placeholder="例如：备用"></div>
+          <div class="field"><label for="concept-key-value">完整 Key</label><input class="input mono" id="concept-key-value" type="password" placeholder="粘贴完整 sk-…"></div>
+          <div class="span-2"><button class="btn" type="button">从页面导入 Key</button> <button class="btn btn-soft" type="button">添加 Key</button></div>
+        </div>
+      </section>
+    </div>
+    <footer class="drawer-footer"><button class="btn btn-danger-soft" type="button" data-dialog-toggle="delete-site" data-drawer-edit-only>删除站点</button><button class="btn" type="button" data-drawer-close>取消</button><button class="btn btn-primary" type="button" data-feedback="已保存" data-drawer-edit-only>保存</button><button class="btn btn-primary" type="button" data-feedback="已识别并添加" data-drawer-add-only hidden>识别并添加</button><button class="btn btn-primary" type="button" data-feedback="批量添加完成" data-drawer-batch-only hidden>批量识别添加</button></footer>
+  </aside>
+
+  <dialog class="dialog" aria-labelledby="concept-dialog-title" data-dialog>
+    <header class="dialog-header">
+      <span class="dialog-mark"><svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.7 3.8 16a2 2 0 0 0 1.7 3h13a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/></svg></span>
+      <div><h2 id="concept-dialog-title">确认替换导入？</h2><p data-dialog-copy>替换前会在本机创建一份含完整 Key 的恢复快照，最长保留 7 天。</p></div>
+    </header>
+    <div class="dialog-body">
+      <div class="dialog-summary" data-dialog-summary><div class="summary-cell"><span data-dialog-label>当前</span><strong data-dialog-value>12</strong></div><div class="summary-cell"><span data-dialog-label>替换后</span><strong data-dialog-value>8</strong></div><div class="summary-cell"><span data-dialog-label>完整 Key</span><strong data-dialog-value>5</strong></div></div>
+    </div>
+    <footer class="dialog-footer"><button class="btn" type="button" data-dialog-close>取消</button><button class="btn btn-danger" type="button" data-dialog-confirm>创建快照并替换</button></footer>
+  </dialog>
+
+  <script src="concept.js"></script>
+</body>
+</html>

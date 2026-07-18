@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>公益站收藏 · 设置</title>
+  <link rel="stylesheet" href="shared-ui.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-shell" id="optionsShell">
+    <header class="options-topbar">
+      <div class="brand">
+        <img class="brand-logo" src="icons/logo.svg" alt="" width="38" height="38">
+        <div class="brand-copy">
+          <h1 class="brand-title">公益站收藏</h1>
+          <p class="brand-subtitle">站点、Key、余额与本机备份</p>
+        </div>
+      </div>
+      <div class="options-topbar-actions">
+        <div class="balance-progress" id="balanceProgress" hidden role="status" aria-live="polite">
+          <span id="balanceProgressText">准备刷新余额</span>
+          <progress id="balanceProgressBar" max="1" value="0"></progress>
+          <strong id="balanceProgressCount"></strong>
+        </div>
+        <button type="button" class="btn" id="refreshAll">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+          <span>刷新全部余额</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="options-layout">
+      <nav class="workspace-nav" aria-label="设置工作区">
+        <p class="nav-label">工作区</p>
+        <button class="nav-item" type="button" aria-current="page" data-view="sites">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v5H4zM4 14h16v5H4z"/></svg>
+          站点管理
+          <span class="nav-meta" id="navSiteCount">0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="import">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14"/></svg>
+          导入与备份
+        </button>
+        <button class="nav-item" type="button" data-view="diagnostics">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v5c0 4.7 3.3 7.8 8 9 4.7-1.2 8-4.3 8-9V7zM9 12l2 2 4-5"/></svg>
+          诊断与权限
+        </button>
+        <p class="privacy-note">数据只保存在本机。扩展不加载远程资源，不上传站点或 Key。</p>
+      </nav>
+
+      <main class="workspace-main">
+        <div class="status-row global-status">
+          <div class="status" id="status" role="status" aria-live="polite"></div>
+          <button type="button" class="btn btn-sm" id="statusAction" hidden></button>
+        </div>
+        <section class="workspace" data-workspace="sites">
+          <header class="workspace-header">
+            <div>
+              <h2 class="workspace-title">站点管理</h2>
+              <p class="workspace-description">管理收藏站点、缓存余额和可选 API Key。</p>
+            </div>
+            <div class="workspace-actions">
+              <button type="button" class="btn" id="openBatchDrawer">批量添加</button>
+              <button type="button" class="btn btn-primary" id="openAddDrawer">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                添加站点
+              </button>
+            </div>
+          </header>
+
+          <section class="panel site-manager-panel" aria-labelledby="siteManagerTitle">
+            <header class="panel-header">
+              <div>
+                <h3 class="panel-title" id="siteManagerTitle">收藏站点 <span class="panel-count" id="listCount"></span></h3>
+                <p class="panel-description">完整列表保持可见；可搜索、筛选和批量删除。</p>
+              </div>
+            </header>
+            <div class="panel-body site-manager-body">
+              <div class="toolbar-row">
+                <label class="toolbar-search">
+                  <span class="visually-hidden">搜索收藏站点</span>
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+                  <input class="input" id="search" type="search" aria-label="搜索收藏站点" placeholder="搜索名称、域名、备注或标签" autocomplete="off">
+                </label>
+                <select class="select" id="listCategory" aria-label="按分类筛选站点">
+                  <option value="all">全部分类</option>
+                  <option value="gongyi">仅公益站</option>
+                  <option value="relay">仅中转站</option>
+                </select>
+              </div>
+
+              <div class="bulk-toolbar bulk-bar" id="bulkBar" aria-live="polite">
+                <strong id="bulkCount">已选 0</strong>
+                <button type="button" class="btn btn-sm" id="bulkSelectAll">全选当前</button>
+                <button type="button" class="btn btn-sm" id="bulkClear">取消选择</button>
+                <button type="button" class="btn btn-danger-soft btn-sm" id="bulkDelete">删除所选</button>
+              </div>
+
+              <div class="site-table-head" aria-hidden="true">
+                <span></span><span>站点</span><span>分类与类型</span><span>余额</span><span>Key</span><span>操作</span>
+              </div>
+              <div class="site-list" id="siteList" aria-label="收藏站点列表"></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="workspace" data-workspace="import" hidden>
+          <header class="workspace-header">
+            <div>
+              <h2 class="workspace-title">导入与备份</h2>
+              <p class="workspace-description">先预览，再合并或替换；完整 Key 始终按敏感数据处理。</p>
+            </div>
+          </header>
+
+          <div class="two-column-workspace">
+            <section class="panel">
+              <header class="panel-header">
+                <div><h3 class="panel-title">导入站点</h3><p class="panel-description">支持本扩展 JSON 与 All API Hub 格式。</p></div>
+              </header>
+              <div class="panel-body stack">
+                <div class="field paste-source">
+                  <label for="importText">粘贴 JSON</label>
+                  <textarea class="textarea mono" id="importText" placeholder='{"sites":[...]}' spellcheck="false"></textarea>
+                </div>
+                <input type="file" id="importFile" accept="application/json,.json" hidden>
+                <button type="button" class="dropzone" id="pickFile">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14"/></svg>
+                  <span><strong>选择 JSON 文件</strong>文件只在本机读取，不会上传</span>
+                </button>
+                <div class="preview-heading">
+                  <strong>导入预览</strong>
+                  <button type="button" class="btn btn-sm" id="previewImport">生成预览</button>
+                </div>
+                <div class="import-preview" id="importPreview" role="status" aria-live="polite">粘贴或选择 JSON 后先生成预览。</div>
+                <div class="import-actions">
+                  <button type="button" class="btn btn-primary" id="doImport">合并导入</button>
+                  <button type="button" class="btn" id="doReplace">替换导入</button>
+                </div>
+              </div>
+            </section>
+
+            <div class="stack">
+              <section class="panel">
+                <header class="panel-header"><div><h3 class="panel-title">导出</h3><p class="panel-description">根据用途选择安全级别。</p></div></header>
+                <div class="panel-body stack">
+                  <article class="export-choice">
+                    <div class="export-choice-header"><div><h3>导出（安全分享）</h3><p>只包含名称、分类和 Origin；不含 Key、备注、标签、余额或深层 URL。</p></div><button type="button" class="btn btn-primary btn-sm" id="exportRedacted">安全导出</button></div>
+                  </article>
+                  <article class="export-choice">
+                    <div class="export-choice-header"><div><h3>导出（含完整 Key）</h3><p>包含敏感凭据，仅保存到可信位置。</p></div><button type="button" class="btn btn-danger-soft btn-sm" id="exportNative">风险导出</button></div>
+                  </article>
+                </div>
+              </section>
+
+              <section class="panel">
+                <header class="panel-header">
+                  <div><h3 class="panel-title">恢复快照</h3><p class="panel-description">最多 3 份，保留 7 天。</p></div>
+                  <button type="button" class="btn btn-ghost btn-sm" id="clearBackups">清理</button>
+                </header>
+                <div class="panel-body snapshot-list">
+                  <p class="panel-description" id="backupSummary">正在读取恢复快照…</p>
+                  <button type="button" class="btn" id="restoreLastImport" hidden>撤销上次替换导入</button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="workspace" data-workspace="diagnostics" hidden>
+          <header class="workspace-header">
+            <div>
+              <h2 class="workspace-title">诊断与权限</h2>
+              <p class="workspace-description">只读检查本机状态，不上传站点、Key 或浏览器数据。</p>
+            </div>
+            <div class="workspace-actions">
+              <button type="button" class="btn" id="copyDiagnostics">复制脱敏诊断</button>
+              <button type="button" class="btn" id="refreshDiagnostics">刷新诊断</button>
+            </div>
+          </header>
+
+          <section class="summary-grid" aria-label="诊断摘要">
+            <article class="diagnostic-summary"><span>站点</span><strong id="diagnosticSiteCount">—</strong><small>本机收藏</small></article>
+            <article class="diagnostic-summary"><span>完整 Key</span><strong id="diagnosticKeyCount">—</strong><small>可复制使用</small></article>
+            <article class="diagnostic-summary"><span>余额失败</span><strong id="diagnosticFailureCount">—</strong><small>需要处理</small></article>
+          </section>
+
+          <section class="panel" id="diagnosticsCard">
+            <header class="panel-header"><div><h3 class="panel-title">需要处理</h3><p class="panel-description">按风险排序，只保留可执行动作。</p></div></header>
+            <div class="panel-body issue-list">
+              <article class="issue-row">
+                <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.7 3.3 7.8 8 9 4.7-1.2 8-4.3 8-9V7z"/></svg></span>
+                <div class="issue-copy"><strong>站点访问权限</strong><p>只为尚未授权的收藏站申请 HTTPS 访问。</p></div>
+                <div class="issue-actions"><button type="button" class="btn btn-sm" id="grantUnauthorizedSites">授权未授权站</button></div>
+              </article>
+              <article class="issue-row">
+                <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></span>
+                <div class="issue-copy"><strong>余额失败站点</strong><p>先重试，仍失败时打开站点恢复登录状态。</p></div>
+                <div class="issue-actions">
+                  <button type="button" class="btn btn-sm" id="retryFailedBalances">重试余额失败</button>
+                  <button type="button" class="btn btn-sm" id="openFailedBalanceSites">打开失败站</button>
+                  <button type="button" class="btn btn-sm" id="openLoginFailedSites">打开未登录站</button>
+                </div>
+              </article>
+            </div>
+            <details class="technical-details">
+              <summary>技术详情</summary>
+              <pre class="mono" id="diagnosticsOut">加载中…</pre>
+            </details>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header"><div><h3 class="panel-title">高级设置</h3><p class="panel-description">高风险能力默认关闭。</p></div></header>
+            <div class="panel-body">
+              <label class="advanced-setting" for="preferUnlimitedAutoKey">
+                <span><strong>自动创建无限额度且永不过期 Key</strong><p>仅影响确认后创建的新 Key；默认仍为约 $10 / 90 天。</p></span>
+                <input type="checkbox" id="preferUnlimitedAutoKey" role="switch">
+              </label>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="drawer-scrim" id="drawerScrim" hidden></div>
+  <aside class="drawer" id="editor" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden data-mode="edit">
+    <header class="drawer-header">
+      <div><h2 id="drawerTitle">编辑站点</h2><p class="panel-description" id="drawerSubtitle">修改站点信息与 Key。</p></div>
+      <button type="button" class="icon-btn" id="closeDrawer" aria-label="关闭抽屉"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </header>
+
+    <div class="drawer-body">
+      <section id="addDrawerPanel" data-drawer-panel="add" hidden>
+        <div class="form-grid">
+          <div class="field span-2"><label for="addUrl">站点 URL 或域名</label><input class="input mono" id="addUrl" placeholder="https://api.example.com 或 example.com"></div>
+          <div class="field span-2"><label for="addKey">API Key（可选）</label><input class="input mono" id="addKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="可稍后补充完整 sk-…"></div>
+          <div class="field"><label for="addCategory">分类</label><select class="select" id="addCategory"><option value="gongyi">公益站</option><option value="relay">中转站</option></select></div>
+          <div class="field"><label for="addName">显示名称（可选）</label><input class="input" id="addName" placeholder="留空使用识别名"></div>
+          <div class="field span-2"><label for="addNote">备注（可选）</label><input class="input" id="addNote" placeholder="例如：稳定 / 限额小"></div>
+          <div class="field span-2"><label for="addTags">标签（逗号分隔）</label><input class="input" id="addTags" placeholder="例如：常用, Claude, 低价"></div>
+        </div>
+        <section class="section-divider">
+          <h3>站点识别</h3><p>只识别不会保存；也可以跳过识别直接添加。</p>
+          <div class="notice drawer-detection" data-tone="info" id="detectPreview">识别结果会显示在这里。</div>
+          <div class="drawer-inline-actions"><button type="button" class="btn" id="detectOnly">只识别</button><button type="button" class="btn" id="addSite">直接添加</button></div>
+        </section>
+      </section>
+
+      <section id="batchDrawerPanel" data-drawer-panel="batch" hidden>
+        <div class="field"><label for="batchUrls">每行一个，或用逗号分隔</label><textarea class="textarea mono" id="batchUrls" placeholder="https://a.example.com&#10;b.example.com"></textarea></div>
+        <div class="notice drawer-detection" data-tone="info" id="batchPreview">结果会显示在这里。</div>
+      </section>
+
+      <section id="editDrawerPanel" data-drawer-panel="edit">
+        <input type="hidden" id="editId">
+        <div class="form-grid">
+          <div class="field span-2"><label for="editName">名称</label><input class="input" id="editName"></div>
+          <div class="field span-2"><label for="editDomain">域名</label><input class="input mono" id="editDomain" readonly aria-readonly="true"><span class="field-hint">由 Origin 自动生成，不能单独修改。</span></div>
+          <div class="field span-2"><label for="editBase">Base URL</label><input class="input mono" id="editBase"><span class="field-hint">为避免 Key 串站，Origin（协议、域名、端口）不可直接更换；需要更换时请新增站点。</span></div>
+          <div class="field span-2"><label for="editPage">控制台 / 页面 URL</label><input class="input mono" id="editPage"></div>
+          <div class="field"><label for="editCategory">分类</label><select class="select" id="editCategory"><option value="gongyi">公益站</option><option value="relay">中转站</option></select></div>
+          <div class="field"><label for="editType">架构类型</label><select class="select" id="editType"><option value="auto">自动</option><option value="newapi">NewAPI</option><option value="sub2api">Sub2API</option><option value="zenapi">ZenAPI</option></select></div>
+          <div class="field span-2"><label for="editTags">标签（逗号分隔）</label><input class="input" id="editTags" placeholder="例如：常用, Claude, 低价"></div>
+          <div class="field span-2"><label for="editNote">备注</label><textarea class="textarea" id="editNote" placeholder="记录稳定性、额度或使用场景"></textarea></div>
+        </div>
+        <div class="drawer-context-actions"><button type="button" class="btn" id="redetect">重新识别</button><button type="button" class="btn" id="refreshOne">刷新余额</button></div>
+        <section class="section-divider">
+          <h3>API Key</h3><p>普通界面只显示名称和尾号；完整 Key 仅在复制或导出时使用。</p>
+          <div class="key-list keys" id="editKeys"></div>
+          <div class="key-add-row">
+            <input class="input" id="newKeyName" placeholder="名称（可选）">
+            <input class="input mono" id="newKeyValue" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴完整、未脱敏的 sk-…">
+            <button type="button" class="btn btn-sm btn-primary" id="addKeyBtn">添加 Key</button>
+          </div>
+          <div class="drawer-inline-actions"><button type="button" class="btn btn-sm" id="importKeysFromPage">从页面导入 Key</button></div>
+        </section>
+      </section>
+    </div>
+
+    <footer class="drawer-footer">
+      <button type="button" class="btn btn-danger-soft" id="deleteSite" data-drawer-only="edit">删除站点</button>
+      <button type="button" class="btn" id="cancelEdit">取消</button>
+      <button type="button" class="btn btn-primary" id="saveEdit" data-drawer-only="edit">保存</button>
+      <button type="button" class="btn btn-primary" id="detectAndAdd" data-drawer-only="add" hidden>识别并添加</button>
+      <button type="button" class="btn btn-primary" id="batchAdd" data-drawer-only="batch" hidden>批量识别添加</button>
+    </footer>
+  </aside>
+
+  <dialog class="dialog" id="confirmDialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogCopy">
+    <form method="dialog">
+      <header class="dialog-header">
+        <span class="dialog-mark" aria-hidden="true"><svg class="icon icon-lg" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 4.7 3.8 16a2 2 0 0 0 1.7 3h13a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/></svg></span>
+        <div><h2 id="confirmDialogTitle">确认操作？</h2><p id="confirmDialogCopy">请确认后继续。</p></div>
+      </header>
+      <div class="dialog-body" id="confirmDialogDetails"></div>
+      <footer class="dialog-footer"><button type="submit" class="btn" value="cancel">取消</button><button type="submit" class="btn btn-danger" id="confirmDialogSubmit" value="confirm">确认</button></footer>
+    </form>
+  </dialog>
+
+  <script src="site-utils.js"></script>
+  <script src="permissions.js"></script>
+  <script src="ui-runtime.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
