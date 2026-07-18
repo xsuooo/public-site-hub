@@ -43,7 +43,7 @@
 - Chrome Stable 完整版本：`150.0.7871.129`
 - Edge Stable 完整版本：
 - Edge/Chromium 自动冒烟结果：Edge `150.0.4078.65` 通过；仅无账号、无 Key 自动门禁
-- Chrome Stable 手工加载与控制台结果：待测试者执行；隔离 Profile 自动尝试确认品牌 Chrome 忽略 `--load-extension`，未将其计作验收结果，临时 Profile 已清理
+- Chrome Stable 手工加载与控制台结果：2026-07-18 已由测试者在 Chrome `150.0.7871.129` 中手工加载版本化解压目录；无账号 UI 冒烟通过（扩展启用与版本、Popup、Options 三工作区、无横向溢出、分类菜单、drawer Escape 回焦、导入预览零写入）；控制台复核与专用测试账号主链路待执行
 - Edge Stable 手工加载与控制台结果：待测试者执行
 - 五天窗口：待两名测试者确认开始日期
 - 问题台账最终状态：自动化审查阶段无 P0、P1 或阻断型 P2；手工验收结果待记录
