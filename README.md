@@ -2,7 +2,7 @@
 
 公益站收藏是一个 Manifest V3 浏览器扩展，用于收藏公益或中转 API 站点、管理本地 Key、查看余额，以及导入或导出站点数据。
 
-当前发布目标是 `1.0.0-rc.2`，仅面向两名可信测试者。它不是公开发布版本，也不得使用生产账号或生产 Key 验收；`1.0.0-rc.1` 资料仅作为历史记录保留。
+当前发布目标是 `1.0.0-rc.2`，面向**单名可信测试者**，须在 Chrome Stable 与 Edge Stable 上各用独立 profile 验收。它不是公开发布版本，也不得使用生产账号或生产 Key 验收；`1.0.0-rc.1` 资料仅作为历史记录保留。
 
 ## 主要能力
 
@@ -94,7 +94,7 @@ npm run verify:ui
 
 - [RC 流程总览](docs/rc/README.md)
 - [RC 验收清单](docs/rc/rc-2-acceptance.md)
-- [双人测试矩阵](docs/rc/rc-2-test-matrix.md)
+- [单人双浏览器测试矩阵](docs/rc/rc-2-test-matrix.md)
 - [问题反馈模板](docs/rc/rc-2-feedback-template.md)
 - [问题台账](docs/rc/rc-2-findings.md)
 - [凭据清理清单](docs/rc/credential-cleanup.md)

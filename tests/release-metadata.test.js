@@ -113,7 +113,7 @@ test('generated packages, profiles, inputs and external attestations stay out of
   }
 });
 
-test('RC documentation fixes immutable artifacts, two-person matrix and release gates', () => {
+test('RC documentation fixes immutable artifacts, single-tester dual-browser matrix and release gates', () => {
   const overview = read('docs/rc/README.md');
   const matrix = read('docs/rc/rc-2-test-matrix.md');
   const acceptance = read('docs/rc/rc-2-acceptance.md');
@@ -126,17 +126,21 @@ test('RC documentation fixes immutable artifacts, two-person matrix and release 
     /SHA-256/,
     /Chrome Stable/,
     /Edge Stable/,
-    /两人/,
+    /一人/,
     /五天/,
     /P0、P1 和阻断型 P2 均为零/
   ]) {
     assert.match(overview, pattern);
   }
-  assert.match(matrix, /测试者 A[\s\S]*Chrome[\s\S]*测试者 B[\s\S]*Edge/);
+  assert.match(matrix, /单人双浏览器/);
+  assert.match(matrix, /Chrome Stable[\s\S]*Edge Stable/);
+  assert.match(acceptance, /单人双浏览器结果/);
   assert.match(acceptance, /可再次从用户手势重试/);
   assert.match(acceptance, /批量刷新显示进度，并可手动请求停止/);
   assert.match(policy, /(?:永不覆盖|不覆盖)/);
+  assert.match(policy, /单人双浏览器/);
   assert.match(cleanup, /撤销[\s\S]*Key/);
+  assert.match(cleanup, /Chrome profile[\s\S]*Edge profile/);
   assert.match(overview, /外部 attestation/);
   assert.match(overview, /注释标签/);
   assert.match(overview, /标签后的记录提交/);
@@ -144,7 +148,7 @@ test('RC documentation fixes immutable artifacts, two-person matrix and release 
   assert.match(overview, /verify:runtime[\s\S]*verify:ui[\s\S]*Playwright/);
   assert.doesNotMatch(changelog, /自动冒烟通过/);
   assert.match(changelog, /自动冒烟必须通过/);
-  assert.match(changelog, /两名测试者必须[\s\S]*并完成五天交叉浏览器验收/);
+  assert.match(changelog, /单名测试者必须[\s\S]*Chrome Stable[\s\S]*Edge Stable[\s\S]*交叉浏览器验收/);
 });
 
 test('superseded 2.x verification documents are archived with explicit banners', () => {
