@@ -5,7 +5,9 @@ const {
   permissionOriginsForSites,
   permissionRequestErrorMessage,
   requestSiteAccessFromGesture,
-  ensureSiteAccess
+  ensureSiteAccess,
+  removeSiteAccess,
+  listOrphanedSiteAccess
 } = require('../permissions.js');
 
 test('foreground permission request starts directly and preserves explicit ports', async () => {
@@ -95,6 +97,59 @@ test('background-safe access checks default to no permission request', async () 
     assert.equal(result.ok, false);
     assert.equal(result.code, 'site_permission_required');
     assert.equal(requests, 0);
+  } finally {
+    global.chrome = previousChrome;
+  }
+});
+
+test('orphaned permission discovery keeps only unused HTTPS origins', async () => {
+  const previousChrome = global.chrome;
+  global.chrome = {
+    runtime: { lastError: null },
+    permissions: {
+      getAll(callback) {
+        callback({
+          permissions: ['storage'],
+          origins: [
+            'https://kept.example.invalid/*',
+            'https://orphan.example.invalid:8443/*',
+            'https://*/*',
+            'https://*.broad.example.invalid/*',
+            'http://ignored.example.invalid/*'
+          ]
+        });
+      }
+    }
+  };
+
+  try {
+    const result = await listOrphanedSiteAccess([{ baseUrl: 'https://kept.example.invalid/' }]);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.origins, ['https://orphan.example.invalid:8443/*']);
+  } finally {
+    global.chrome = previousChrome;
+  }
+});
+
+test('site permission removal preserves explicit ports and reports denial', async () => {
+  const previousChrome = global.chrome;
+  const runtime = { lastError: null };
+  const calls = [];
+  global.chrome = {
+    runtime,
+    permissions: {
+      remove(details, callback) {
+        calls.push(details);
+        callback(true);
+      }
+    }
+  };
+
+  try {
+    const result = await removeSiteAccess({ baseUrl: 'https://orphan.example.invalid:8443/' });
+    assert.equal(result.ok, true);
+    assert.equal(result.removed, true);
+    assert.deepEqual(calls, [{ origins: ['https://orphan.example.invalid:8443/*'] }]);
   } finally {
     global.chrome = previousChrome;
   }

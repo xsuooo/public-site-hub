@@ -59,6 +59,10 @@ test('high-risk auto-key preference lives in diagnostics and defaults remain con
   const preference = html.indexOf('id="preferUnlimitedAutoKey"');
   assert.ok(diagnosticsStart >= 0 && preference > diagnosticsStart);
   assert.match(js, /preferUnlimitedAutoKey/);
+  const prefStart = js.indexOf("const unlimitedKeyPref = $('preferUnlimitedAutoKey')");
+  const prefSource = js.slice(prefStart, js.indexOf("$('refreshAll')", prefStart));
+  assert.match(prefSource, /await confirmAction\(/);
+  assert.ok(prefSource.indexOf('confirmAction') < prefSource.indexOf("send('savePrefs'"));
   assert.match(html, /高风险能力默认关闭/);
 });
 
@@ -89,6 +93,12 @@ test('all imports require a current preview and remain mutually exclusive', () =
   assert.match(js, /title:\s*'确认替换导入？'/);
   assert.match(js, /跳过：\$\{skipped\}/);
   assert.match(js, /preview\.duplicates/);
+  assert.match(js, /IMPORT_MAX_BYTES/);
+  assert.match(js, /IMPORT_MAX_SITES/);
+  assert.match(js, /file\.size/);
+  assert.match(js, /previewUpdatedAt/);
+  assert.match(js, /changes\.siteDataMeta/);
+  assert.match(extractFunction(js, 'runImport'), /\$\('importText'\)\.value\s*=\s*''/);
 });
 
 test('dangerous actions use native dialog confirmation before mutations', () => {
@@ -127,6 +137,7 @@ test('diagnostics formatter is read-only and covers schema counts', () => {
   assert.match(text, /站点数：2/);
   assert.match(text, /完整 Key：1/);
   assert.match(text, /已授权 1 · 未授权 1/);
+  assert.match(text, /孤立授权：0/);
   for (const id of ['copyDiagnostics', 'grantUnauthorizedSites', 'retryFailedBalances', 'openFailedBalanceSites', 'openLoginFailedSites']) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
@@ -135,11 +146,25 @@ test('diagnostics formatter is read-only and covers schema counts', () => {
   assert.match(js, /getDiagnostics|formatDiagnostics|refreshDiagnostics/);
 });
 
+test('diagnostics exposes orphaned permission cleanup and an all-clear state', () => {
+  for (const id of ['diagnosticOrphanedCount', 'orphanedPermissionIssue', 'cleanupOrphanedAccess',
+    'diagnosticsAllClear', 'maintenanceIssue', 'refreshMaintenance']) {
+    assert.match(html, new RegExp(`id=["']${id}["']`));
+  }
+  assert.match(js, /send\('removeOrphanedSiteAccess'\)/);
+  assert.match(js, /清理孤立授权/);
+  assert.match(html, /当前没有需要处理的问题/);
+  const redacted = eval(`(${extractFunction(js, 'buildRedactedDiagnostics')})`);
+  const report = redacted({ orphanedPermissionCount: 3 });
+  assert.match(report, /孤立授权：3/);
+  assert.doesNotMatch(report, /origins|example\.com/i);
+});
+
 test('copied diagnostics are allowlisted and exclude site or credential material', () => {
   const buildRedactedDiagnostics = eval(`(${extractFunction(js, 'buildRedactedDiagnostics')})`);
   const report = buildRedactedDiagnostics({
-    extensionVersion: '1.0.0-rc.1',
-    manifestVersion: '0.99.0.1',
+    extensionVersion: '1.0.0-rc.2',
+    manifestVersion: '0.99.0.2',
     schemaVersion: 4,
     siteCount: 3,
     authorizedSiteCount: 2,
@@ -159,7 +184,7 @@ test('copied diagnostics are allowlisted and exclude site or credential material
     cookie: 'secret-cookie'
   }, 'Mozilla/5.0 Chrome/150.0.0.0 Edg/150.0.0.0');
 
-  assert.match(report, /1\.0\.0-rc\.1/);
+  assert.match(report, /1\.0\.0-rc\.2/);
   assert.match(report, /Edge 150\.0\.0\.0/);
   assert.match(report, /schema：v4/);
   assert.match(report, /已授权 2 · 未授权 1/);
@@ -193,6 +218,33 @@ test('options requests host access in foreground click paths before messaging th
   assert.match(js, /resolveInputAction[\s\S]*requestOptionsAccessFromGesture[\s\S]*send\(mode/);
 });
 
+test('batch add never reuses hidden single-site fields or credentials', () => {
+  const batchStart = js.indexOf("const batchAddBtn = $('batchAdd')");
+  const batchEnd = js.indexOf("$('addSite').addEventListener", batchStart);
+  assert.ok(batchStart >= 0 && batchEnd > batchStart);
+  const batchHandler = js.slice(batchStart, batchEnd);
+
+  assert.match(html, /批量添加不会读取或保存 API Key/);
+  assert.match(batchHandler, /const text = \(\$\('batchUrls'\)\?\.value \|\| ''\)\.trim\(\)/);
+  assert.doesNotMatch(batchHandler, /\$\('add(?:Url|Key|Note|Tags|Category)'\)/);
+  assert.match(batchHandler, /send\('batchDetectAndSave', \{ text \}\)/);
+});
+
+test('drawer lifecycle clears transient credential inputs', () => {
+  const fields = {
+    addKey: { value: 'sk-single-site-secret' },
+    newKeyValue: { value: 'sk-editor-secret' }
+  };
+  const $ = (id) => fields[id] || null;
+  const clearCredentialInputs = eval(`(${extractFunction(js, 'clearCredentialInputs')})`);
+
+  clearCredentialInputs();
+  assert.equal(fields.addKey.value, '');
+  assert.equal(fields.newKeyValue.value, '');
+  assert.match(extractFunction(js, 'setDrawerMode'), /clearCredentialInputs\(\)/);
+  assert.match(extractFunction(js, 'closeDrawer'), /clearCredentialInputs\(\)/);
+});
+
 test('options escapes identifiers and uses the shared runtime', () => {
   assert.equal(
     uiRuntime.escapeAttr('x" onmouseover="alert(1)&<'),
@@ -205,4 +257,102 @@ test('options escapes identifiers and uses the shared runtime', () => {
   assert.match(js, /PublicSiteUi\.sendMessage/);
   assert.match(js, /PublicSiteUi\.writeClipboard/);
   assert.match(js, /PublicSiteUi\.keyActionsFor/);
+});
+
+test('options site manager exposes tag filtering, sorting, and health state on every layout', () => {
+  for (const id of ['listTag', 'listSort', 'listCategory', 'stopBalanceRefresh']) {
+    assert.match(html, new RegExp(`id=["']${id}["']`));
+  }
+  assert.match(html, /站点排序/);
+  assert.match(html, /健康状态/);
+  assert.match(js, /tagFilter:\s*'all'/);
+  assert.match(js, /sortOrder:\s*'current'/);
+  assert.match(js, /collectSiteTags/);
+  assert.match(js, /state\.tagFilter/);
+  assert.match(js, /state\.sortOrder/);
+  const visibleSource = extractFunction(js, 'visibleSites');
+  assert.match(visibleSource, /sortOrder === 'name'/);
+  assert.match(visibleSource, /sortOrder === 'updated'/);
+  assert.match(visibleSource, /sortOrder === 'health'/);
+  assert.match(js, /class="table-health"/);
+  assert.match(js, /data-act="refresh" aria-label="刷新\$\{escapeAttr\(site\.name \|\| site\.domain\)\}余额"/);
+  assert.match(html, /id="refreshAll"[^>]*aria-label="刷新全部余额"/);
+});
+
+test('options keeps bulk deletion scoped to the current filtered result', () => {
+  assert.match(js, /function reconcileSelection\(sites = visibleSites\(\)\)/);
+  assert.match(extractFunction(js, 'renderList'), /reconcileSelection\(sites\)/);
+  const selectionState = { selected: new Set(['visible', 'hidden']) };
+  const reconcileSelection = Function(
+    'state',
+    `return (${extractFunction(js, 'reconcileSelection')});`
+  )(selectionState);
+  reconcileSelection([{ id: 'visible' }]);
+  assert.deepEqual([...selectionState.selected], ['visible']);
+  const deleteSource = extractFunction(js, 'deleteSelected');
+  assert.match(deleteSource, /currentIds/);
+  assert.match(deleteSource, /if \(!currentIds\.has\(id\)\) state\.selected\.delete\(id\)/);
+});
+
+test('a busy batch deletion never falls back to partial deletion', () => {
+  const source = extractFunction(js, 'deleteSelected');
+  const busyGuard = source.indexOf('if (res.code)');
+  const fallbackLoop = source.indexOf('for (const id of ids)', busyGuard);
+  assert.ok(busyGuard >= 0 && fallbackLoop > busyGuard);
+  const guardBlock = source.slice(busyGuard, fallbackLoop);
+  assert.match(guardBlock, /setStatus\(res\.error \|\| [^,]+, 'err'\)/);
+  assert.match(guardBlock, /return;/);
+});
+
+test('options synchronizes sites, preferences, backups, and balance state without overwriting edit drafts', () => {
+  const listenerStart = js.indexOf("if (chrome.storage?.onChanged)");
+  const listenerEnd = js.indexOf('async function deleteOne', listenerStart);
+  assert.ok(listenerStart >= 0 && listenerEnd > listenerStart);
+  const listener = js.slice(listenerStart, listenerEnd);
+  assert.match(listener, /changes\.sites/);
+  assert.match(listener, /changes\.prefs/);
+  assert.match(listener, /changes\.siteBackups/);
+  assert.match(listener, /changes\.balanceRefreshProgress/);
+  assert.match(listener, /applySitesSnapshot\(changes\.sites\.newValue \|\| \[\], \{ external: true \}\)/);
+  assert.match(js, /function editorDraftDirty\(\)/);
+  assert.match(js, /当前编辑草稿已保留/);
+  assert.match(js, /refreshLatestImportBackup\(\)/);
+
+  const baseline = {
+    name: '站点', domain: 'a.example.com', baseUrl: 'https://a.example.com',
+    pageUrl: 'https://a.example.com/console', category: 'gongyi', type: 'newapi',
+    note: '', tags: '常用'
+  };
+  const fields = {
+    editor: { hidden: false }, editName: { value: baseline.name }, editDomain: { value: baseline.domain },
+    editBase: { value: baseline.baseUrl }, editPage: { value: baseline.pageUrl },
+    editCategory: { value: baseline.category }, editType: { value: baseline.type },
+    editNote: { value: baseline.note }, editTags: { value: baseline.tags }, newKeyValue: { value: '' }
+  };
+  const editorState = { drawerMode: 'edit', editingBaseline: baseline };
+  const editorDraftDirty = Function(
+    'state', '$',
+    `return (${extractFunction(js, 'editorDraftDirty')});`
+  )(editorState, (id) => fields[id]);
+  assert.equal(editorDraftDirty(), false);
+  fields.editName.value = '草稿名';
+  assert.equal(editorDraftDirty(), true);
+  fields.editName.value = baseline.name;
+  fields.newKeyValue.value = 'sk-local-draft-123456';
+  assert.equal(editorDraftDirty(), true);
+});
+
+test('options balance progress exposes cooperative stop and every persisted terminal state', () => {
+  const progressSource = extractFunction(js, 'renderBalanceProgress');
+  assert.match(html, /id="balanceProgress"[^>]*role="region"[^>]*aria-describedby="balanceProgressText balanceProgressCount"/);
+  assert.match(html, /id="balanceProgressBar"[^>]*aria-busy="false"/);
+  assert.match(progressSource, /\['running', 'stopping'\]\.includes\(status\)/);
+  for (const status of ['stopping', 'stopped', 'interrupted', 'completed']) {
+    assert.match(progressSource, new RegExp(`status === '${status}'`));
+  }
+  const stopStart = js.indexOf("$('stopBalanceRefresh')?.addEventListener('click'");
+  assert.notEqual(stopStart, -1);
+  const stopSource = js.slice(stopStart, js.indexOf('\n});', stopStart) + 4);
+  assert.match(stopSource, /status:\s*'stopping'/);
+  assert.match(stopSource, /send\('stopBalanceRefresh',\s*\{ runId \}\)/);
 });

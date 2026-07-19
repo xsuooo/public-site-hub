@@ -1,17 +1,17 @@
-# 1.0.0-rc.1 验收清单
+# 1.0.0-rc.2 验收清单
 
 状态：待执行
 
-本清单必须针对 `v1.0.0-rc.1` 对应提交和由该提交生成的不可变 ZIP 执行。测试只使用专用账号，不得使用生产 Key。
+本清单必须针对 `v1.0.0-rc.2` 对应提交和由该提交生成的不可变 ZIP 执行。测试只使用专用账号，不得使用生产 Key。
 
 ## 候选信息
 
 - 提交 SHA：
-- Git 标签：`v1.0.0-rc.1`
-- Manifest 版本：`0.99.0.1`
-- ZIP 文件：`public-site-hub-1.0.0-rc.1.zip`
+- Git 标签：`v1.0.0-rc.2`
+- Manifest 版本：`0.99.0.2`
+- ZIP 文件：`public-site-hub-1.0.0-rc.2.zip`
 - ZIP SHA-256：
-- 外部 attestation：`public-site-hub-1.0.0-rc.1.attestation.json`
+- 外部 attestation：`public-site-hub-1.0.0-rc.2.attestation.json`
 - attestation SHA-256：
 - 构建日期：
 - 构建执行人：
@@ -92,7 +92,7 @@
 - [ ] 测试者 A 完成 Chrome 主验收、Edge 干净 profile 冒烟和五天记录。
 - [ ] 测试者 B 完成 Edge 主验收、Chrome 干净 profile 冒烟和五天记录。
 - [ ] 两人使用独立账号、独立 Key 和独立浏览器 profile。
-- [ ] 所有发现均进入 `rc-1-findings.md`，没有仅存在于聊天或口头反馈中的阻断项。
+- [ ] 所有发现均进入 `rc-2-findings.md`，没有仅存在于聊天或口头反馈中的阻断项。
 
 ## 放行判定
 

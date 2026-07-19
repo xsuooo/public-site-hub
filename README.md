@@ -2,7 +2,7 @@
 
 公益站收藏是一个 Manifest V3 浏览器扩展，用于收藏公益或中转 API 站点、管理本地 Key、查看余额，以及导入或导出站点数据。
 
-当前发布目标是 `1.0.0-rc.1`，仅面向两名可信测试者。它不是公开发布版本，也不得使用生产账号或生产 Key 验收。
+当前发布目标是 `1.0.0-rc.2`，仅面向两名可信测试者。它不是公开发布版本，也不得使用生产账号或生产 Key 验收；`1.0.0-rc.1` 资料仅作为历史记录保留。
 
 ## 主要能力
 
@@ -11,7 +11,10 @@
 - Key 与站点数据仅保存在浏览器本地；接口地址和 Key 分开复制。
 - 按站点请求可选 HTTPS 权限；拒绝某一站授权不应影响已授权站点。
 - 查询单站或批量余额；批量任务支持停止、继续和浏览器重启后的恢复。
+- 仅使用 `alarms` 每日清理过期本机恢复快照，不会定时访问站点或自动刷新余额。
 - 导入前预览新增、更新和跳过数量；支持脱敏导出、完整导出和替换导入快照。
+- 导入单次限制为 2 MB、1000 个站点；预览后站点数据发生变化时必须重新预览。
+- 诊断页可查看并清理不再对应收藏站点的孤立 HTTPS 授权，复制内容不包含真实域名。
 - 手动复制脱敏诊断；项目不包含遥测、远程日志或自动上传。
 
 ## RC 安装
@@ -31,9 +34,10 @@ npm test
 npm run build
 npm run verify:package
 npm run verify:runtime
+npm run verify:ui
 ```
 
-`npm run verify:runtime` 是无账号、无 Key 的 Edge/Chromium 扩展上下文自动冒烟门禁。品牌 Chrome Stable 需要按 RC 清单手工加载；真实授权、余额和 Key 流程仍需使用专用测试账号完成。
+`npm run verify:runtime` 是无账号、无 Key 的 Edge/Chromium 扩展上下文自动冒烟门禁。`npm run verify:ui` 另外使用 Playwright 的隔离 Edge profile，合成 empty、single、mixed、hundred 四种数据，检查 Popup/Options 的布局、筛选、排序、键盘、路由、深色模式和 125% 等效视口。品牌 Chrome Stable 需要按 RC 清单手工加载；真实授权、余额和 Key 流程仍需使用专用测试账号完成。
 
 ## 基本使用
 
@@ -47,7 +51,7 @@ npm run verify:runtime
 
 ## 本地开发
 
-要求：Node.js 22 或更高版本，以及用于自动冒烟的 Edge Stable 或可加载未打包扩展的 Chromium。
+要求：Node.js 22 或更高版本，以及用于自动冒烟和 UI 门禁的 Edge Stable（或可加载未打包扩展的 Chromium）。安装依赖后，Playwright 测试默认寻找 Edge；也可通过 `PUBLIC_SITE_HUB_BROWSER_PATH` 指定可执行文件。
 
 ```powershell
 npm test
@@ -55,6 +59,7 @@ npm run test:coverage
 npm run build
 npm run verify:package
 npm run verify:runtime
+npm run verify:ui
 ```
 
 - `npm test`：运行自动化测试。
@@ -62,12 +67,14 @@ npm run verify:runtime
 - `npm run build`：生成 `dist/`。
 - `npm run verify:package`：校验 `dist/` 只包含允许的运行时文件。
 - `npm run verify:runtime`：在 Edge/Chromium 真实扩展上下文执行无凭据自动冒烟检查；它不替代 Chrome Stable 手工验收。
+- `npm run verify:ui`：构建扩展并运行单 worker Playwright UI 门禁；测试 profile、storage 和截图均为临时数据，不进入 `dist/`。
 
 修改源码后重新构建并在扩展管理页重新加载。不要直接编辑 `dist/`，也不要把 `dist/`、测试浏览器配置或发布 ZIP 提交到 Git。
 
 ## 权限与本地数据
 
 - `storage`：在 `chrome.storage.local` 中保存站点、Key、偏好、迁移状态和未完成批量任务。
+- `alarms`：仅唤醒本地维护任务，清理超过保留期的恢复快照；不执行网络请求。
 - `tabs`：在用户主动打开站点、识别、导入 Key 或查询余额时读取或创建相关标签页。
 - `cookies`：在用户主动操作时读取当前测试站点的登录会话；不会读取浏览器保存的密码。
 - `activeTab`：在用户点击扩展或右键入口时临时访问当前页面。
@@ -77,6 +84,8 @@ npm run verify:runtime
 
 原生完整导出和恢复快照可能包含完整 Key，应按敏感文件处理。脱敏导出不能恢复完整凭据。站点 URL 在保存前会移除 query 和 hash，避免临时令牌或授权码进入本地数据。
 
+`chrome.storage.local` 受浏览器 profile 保护，但扩展不会额外加密其中的 Key；能够读取该 profile 的本机用户或调试工具仍可能读取完整值。需要更强 at-rest 保护时，应使用独立浏览器 profile 或操作系统级凭据库，而不是把口令写回扩展存储。
+
 ## 隐私边界
 
 扩展没有遥测、远程诊断、分析 SDK 或崩溃上报。诊断只能由用户主动复制，并必须排除完整 Key、Cookie、完整站点列表、备注、URL query/hash 和完整存储。
@@ -84,18 +93,19 @@ npm run verify:runtime
 ## RC 发布资料
 
 - [RC 流程总览](docs/rc/README.md)
-- [RC 验收清单](docs/rc/rc-1-acceptance.md)
-- [双人测试矩阵](docs/rc/rc-1-test-matrix.md)
-- [问题反馈模板](docs/rc/rc-1-feedback-template.md)
-- [问题台账](docs/rc/rc-1-findings.md)
+- [RC 验收清单](docs/rc/rc-2-acceptance.md)
+- [双人测试矩阵](docs/rc/rc-2-test-matrix.md)
+- [问题反馈模板](docs/rc/rc-2-feedback-template.md)
+- [问题台账](docs/rc/rc-2-findings.md)
 - [凭据清理清单](docs/rc/credential-cleanup.md)
 - [不可变发布与撤回规则](docs/rc/immutable-release-policy.md)
+- [架构方案与当前选择](docs/architecture-decision.md)
 - [版本历史](CHANGELOG.md)
 
 维护者只能在干净、正好指向版本注释标签的独立 worktree 中生成候选物：
 
 ```powershell
-npm run release:artifact -- --out-dir ../public-site-hub-rc1-artifacts
+npm run release:artifact -- --out-dir ../public-site-hub-rc2-artifacts
 ```
 
 该命令会重新构建并校验 `dist/`，再生成确定性 ZIP、标准 `.sha256` sidecar 和 Git 外部 attestation；已有同名文件时会拒绝覆盖。完整的标签、复现和发布记录顺序以 [RC 流程总览](docs/rc/README.md) 为准。

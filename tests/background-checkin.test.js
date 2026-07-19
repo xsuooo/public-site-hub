@@ -76,7 +76,8 @@ function loadBackground(overrides = {}) {
         create: async () => ({}),
         remove: async () => undefined
       },
-      permissions: overrides.permissions
+      permissions: overrides.permissions,
+      alarms: overrides.alarms || undefined
     },
     ...overrides.globals
   };
@@ -103,6 +104,7 @@ function loadBackground(overrides = {}) {
     retained,
     lifecycle,
     dispatch,
+    context,
     contextMenuClick: (...args) => contextMenuClickListener?.(...args)
   };
 }
@@ -162,6 +164,67 @@ test('context-menu setup coalesces overlapping install and startup signals', () 
   removeCallbacks.shift()();
   assert.deepEqual(createdIds, ['public-site-hub-add']);
   assert.deepEqual(duplicateIds, []);
+});
+
+test('messages wait for startup migration and expired-backup cleanup', async () => {
+  let releaseMigration;
+  const migrationGate = new Promise((resolve) => { releaseMigration = resolve; });
+  let listCalls = 0;
+  let backupCleanupCalls = 0;
+  const app = loadBackground({
+    globals: {
+      migrateSiteData: async () => migrationGate,
+      loadSiteBackups: async () => {
+        backupCleanupCalls += 1;
+        return [];
+      },
+      loadSites: async () => {
+        listCalls += 1;
+        return [];
+      }
+    }
+  });
+
+  const response = app.dispatch({ type: 'listSites' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(listCalls, 0, 'site reads must not race the startup migration');
+  releaseMigration();
+
+  const result = await response;
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.sites)), []);
+  assert.equal(listCalls, 1);
+  assert.equal(backupCleanupCalls, 1);
+});
+
+test('maintenance alarm performs daily recovery-snapshot cleanup', async () => {
+  const created = [];
+  let onAlarm = null;
+  let cleanupCalls = 0;
+  loadBackground({
+    alarms: {
+      create(name, options) { created.push([name, options]); },
+      onAlarm: { addListener(listener) { onAlarm = listener; } }
+    },
+    globals: {
+      migrateSiteData: async () => ({ migrated: false }),
+      loadSiteBackups: async () => {
+        cleanupCalls += 1;
+        return [];
+      }
+    }
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(created[0][0], 'public-site-hub-maintenance');
+  assert.equal(created[0][1].periodInMinutes, 24 * 60);
+  assert.equal(typeof onAlarm, 'function');
+  assert.equal(cleanupCalls, 1, 'cold start should clean expired snapshots immediately');
+
+  onAlarm({ name: 'unrelated' });
+  onAlarm({ name: 'public-site-hub-maintenance' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cleanupCalls, 2);
 });
 
 test('context-menu detection reuses the source tab only for the exact target origin', async () => {
@@ -370,6 +433,15 @@ test('page-session reading accepts both user and User storage conventions', () =
   assert.match(backgroundSource, /canonicalOrigin[\s\S]*?if \(!canonicalOrigin\) return empty/);
 });
 
+test('page Key import stays bound to the selected tab and complete Origin', () => {
+  const start = backgroundSource.indexOf("case 'importKeysFromPage'");
+  const end = backgroundSource.indexOf('\n      default:', start);
+  const source = backgroundSource.slice(start, end);
+  assert.match(source, /readPageAuthSession\(site\.domain, siteOrigin\(site\), tabId\)/);
+  assert.match(source, /persistScrapedKeys\([\s\S]*?site\.id,[\s\S]*?siteOrigin\(site\)/);
+  assert.doesNotMatch(source, /persistScrapedKeys\([\s\S]*?site\.id,[\s\S]*?site\.domain,/);
+});
+
 test('automatic background Key import accepts only account-verified token API values', () => {
   const keyImportSource = fs.readFileSync(path.join(__dirname, '..', 'key-import.js'), 'utf8');
   const autoImport = keyImportSource.match(/async function tryAutoImportKeys\([^)]*\)\s*\{[\s\S]*?\n}/)?.[0];
@@ -471,6 +543,31 @@ test('background serializes concurrent import requests', async () => {
   assert.equal(responses[1].backup.id, 'backup-1');
 });
 
+test('background preserves site_operation_busy for single and batch deletion', async () => {
+  const busyError = () => {
+    const error = new Error('站点正在执行其他操作，请稍后再删除');
+    error.code = 'site_operation_busy';
+    return error;
+  };
+  const app = loadBackground({
+    globals: {
+      loadSites: async () => [{ id: 'site-1' }, { id: 'site-2' }],
+      removeSiteById: async () => { throw busyError(); },
+      removeSitesByIds: async () => { throw busyError(); }
+    }
+  });
+
+  for (const message of [
+    { type: 'removeSite', id: 'site-1' },
+    { type: 'removeSites', ids: ['site-1', 'site-2'] }
+  ]) {
+    const response = await app.dispatch(message);
+    assert.equal(response.ok, false);
+    assert.equal(response.code, 'site_operation_busy');
+    assert.match(response.error, /稍后再删除/);
+  }
+});
+
 test('background replace import uses the atomic backup service', async () => {
   let atomicCalls = 0;
   let legacyCalls = 0;
@@ -557,6 +654,44 @@ test('background import preview reports skipped and duplicate source entries', a
   assert.equal(response.incoming, 2);
   assert.equal(response.updating, 1);
   assert.equal(response.added, 1);
+});
+
+test('background import preview binds a site-data version and rejects stale commits', async () => {
+  let importCalls = 0;
+  let receivedOptions = null;
+  const app = loadBackground({
+    sites: [{ id: 'current', domain: 'one.example.com' }],
+    globals: {
+      loadSiteDataMeta: async () => ({ updatedAt: 42 }),
+      parseImportText: () => ({
+        format: 'native',
+        sourceCount: 1,
+        sites: [{ id: 'incoming', domain: 'two.example.com' }]
+      }),
+      importSites: async (sites, options) => {
+        importCalls += 1;
+        receivedOptions = options;
+        return sites;
+      }
+    }
+  });
+
+  const preview = await app.dispatch({ type: 'previewImport', text: '{}' });
+  assert.equal(preview.ok, true);
+  assert.equal(preview.dataUpdatedAt, 42);
+
+  const stale = await app.dispatch({
+    type: 'import', text: '{}', mode: 'merge', previewUpdatedAt: 41
+  });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.code, 'import_preview_stale');
+  assert.equal(importCalls, 0);
+
+  const committed = await app.dispatch({
+    type: 'import', text: '{}', mode: 'merge', previewUpdatedAt: 42
+  });
+  assert.equal(committed.ok, true);
+  assert.equal(receivedOptions.expectedUpdatedAt, 42);
 });
 
 test('background publishes per-site balance refresh progress and returns the final state', async () => {
@@ -1223,6 +1358,84 @@ test('detectAndSave stays local even for sites saved with legacy opt-in data', a
   assert.equal(response.ok, true);
   assert.equal(response.checkin, null);
   assert.equal(app.actionCalls.length, 0);
+});
+
+test('batch add rejects credential-bearing requests before touching any site', async () => {
+  let detections = 0;
+  let writes = 0;
+  const app = loadBackground({
+    globals: {
+      detectSite: async () => {
+        detections += 1;
+        return { ok: false };
+      },
+      upsertSite: async () => {
+        writes += 1;
+        return [];
+      }
+    }
+  });
+
+  for (const credential of [
+    { key: 'sk-single-site-secret-123' },
+    { keys: [{ name: '默认', key: 'sk-array-secret-123' }] },
+    { apiKey: 'sk-legacy-secret-123' },
+    { token: 'sk-token-secret-123' }
+  ]) {
+    const response = await app.dispatch({
+      type: 'batchDetectAndSave',
+      text: 'https://a.example.com\nhttps://b.example.com',
+      ...credential
+    });
+    assert.equal(response.ok, false);
+    assert.equal(response.code, 'batch_key_not_allowed');
+  }
+
+  assert.equal(detections, 0);
+  assert.equal(writes, 0);
+});
+
+test('batch add without credentials saves every site with an empty key list', async () => {
+  const sites = [];
+  const writes = [];
+  let keyImportCalls = 0;
+  const app = loadBackground({
+    sites,
+    globals: {
+      detectSite: async (input) => {
+        const url = new URL(input);
+        return {
+          ok: true,
+          domain: url.hostname,
+          name: url.hostname,
+          baseUrl: url.origin,
+          pageUrl: url.origin,
+          type: 'newapi',
+          summary: '已识别'
+        };
+      },
+      upsertSite: async (partial) => {
+        writes.push(partial);
+        sites.push({ ...partial, id: `site-${sites.length + 1}` });
+        return sites;
+      }
+    }
+  });
+  app.context.tryAutoImportKeys = async () => {
+    keyImportCalls += 1;
+    return { added: 1 };
+  };
+
+  const response = await app.dispatch({
+    type: 'batchDetectAndSave',
+    text: 'https://a.example.com\nhttps://b.example.com'
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.okCount, 2);
+  assert.equal(writes.length, 2);
+  assert.equal(writes.every((site) => Array.isArray(site.keys) && site.keys.length === 0), true);
+  assert.equal(keyImportCalls, 0, 'batch add must never scan or import site credentials');
 });
 
 test('detectAndSave leaves legacy check-in data untouched without invoking the other extension', async () => {

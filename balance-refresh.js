@@ -4,19 +4,168 @@
  */
 (function (root) {
   let activeBalanceRefresh = null;
+  // 单站与批量刷新共享同一份 in-flight Promise。这样同一站点不会同时发出
+  // 两组余额请求，也不会让较早完成的结果覆盖较新的 attempt。
+  const activeSiteBalanceRefreshes = new Map();
 
   function createBalanceRefreshRunId() {
     return `balance_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
   }
 
+  function createBalanceAttemptId(siteId) {
+    return `balance_site_${String(siteId || '').slice(0, 40)}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  function balanceSiteOrigin(site) {
+    if (typeof root.siteIdentity === 'function') return root.siteIdentity(site) || '';
+    if (typeof root.siteOriginForKeyImport === 'function') return root.siteOriginForKeyImport(site) || '';
+    try {
+      const raw = site && typeof site === 'object'
+        ? (site.baseUrl || site.pageUrl || site.domain)
+        : site;
+      const url = new URL(/^https:\/\//i.test(String(raw || '')) ? raw : `https://${raw}`);
+      return url.protocol === 'https:' ? url.origin.toLowerCase() : '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function balanceAttemptFailure(code, error, extra = {}) {
+    return {
+      ok: false,
+      skipped: true,
+      code: code || 'balance_attempt_stale',
+      error: error || '站点在刷新期间已发生变化，已取消过期请求',
+      ...extra
+    };
+  }
+
+  async function claimBalanceAttempt(siteId) {
+    const sites = await loadSites();
+    const site = (Array.isArray(sites) ? sites : [])
+      .find((item) => String(item?.id) === String(siteId));
+    if (!site) return balanceAttemptFailure('site_not_found', '站点不存在');
+    const expectedOrigin = balanceSiteOrigin(site);
+    if (!expectedOrigin) return balanceAttemptFailure('site_domain_changed', '站点 Origin 无效，已取消余额刷新');
+    const attemptId = createBalanceAttemptId(siteId);
+    if (typeof root.beginBalanceRefreshAttempt === 'function') {
+      const claimed = await root.beginBalanceRefreshAttempt(siteId, expectedOrigin, attemptId);
+      if (!claimed?.ok) return claimed;
+      return {
+        ok: true,
+        site: claimed.site || site,
+        attempt: { ...claimed.attempt, attemptId, siteId: String(siteId), expectedOrigin, cancelled: false }
+      };
+    }
+    // 兼容仅加载 balance-refresh.js 的旧测试/临时上下文；正式 Worker 会走持久化 CAS。
+    return {
+      ok: true,
+      site,
+      attempt: { siteId: String(siteId), expectedOrigin, attemptId, startedAt: Date.now(), cancelled: false }
+    };
+  }
+
+  async function loadCurrentBalanceSite(attempt) {
+    if (!attempt || attempt.cancelled) {
+      return balanceAttemptFailure('balance_attempt_cancelled', '余额刷新已取消，未继续请求');
+    }
+    const sites = await loadSites();
+    const site = (Array.isArray(sites) ? sites : [])
+      .find((item) => String(item?.id) === String(attempt.siteId));
+    if (!site) return balanceAttemptFailure('site_not_found', '站点已删除，已取消余额刷新');
+    const currentOrigin = balanceSiteOrigin(site);
+    if (!currentOrigin || currentOrigin !== attempt.expectedOrigin) {
+      return balanceAttemptFailure(
+        'site_domain_changed',
+        '站点地址已修改，已取消过期的余额刷新'
+      );
+    }
+    if (typeof root.isBalanceRefreshAttemptCurrent === 'function') {
+      const current = await root.isBalanceRefreshAttemptCurrent(
+        attempt.siteId,
+        attempt.expectedOrigin,
+        attempt.attemptId
+      );
+      if (!current) {
+        return balanceAttemptFailure(
+          'balance_attempt_stale',
+          '余额刷新已被更新的任务替代，未写入旧结果'
+        );
+      }
+    }
+    return { ok: true, site };
+  }
+
+  async function finishBalanceAttempt(attempt) {
+    if (!attempt || typeof root.finishBalanceRefreshAttempt !== 'function') return;
+    try {
+      await root.finishBalanceRefreshAttempt(attempt.siteId, attempt.attemptId);
+    } catch (error) {
+      console.warn('[公益站收藏] 清理余额刷新 attempt 失败', balanceLogErrorCode(error));
+    }
+  }
+
+  function balanceOperationFailure(error) {
+    const classified = classifySiteBalanceError(
+      error?.message || error,
+      error?.code || 'refresh_failed'
+    );
+    return {
+      ok: false,
+      code: classified.code,
+      error: classified.message,
+      action: classified.action
+    };
+  }
+
+  function coordinateSiteBalanceRefresh(siteId, operation) {
+    const key = String(siteId || '').trim();
+    if (!key) return Promise.resolve(balanceAttemptFailure('site_not_found', '站点不存在'));
+    const existing = activeSiteBalanceRefreshes.get(key);
+    if (existing) return existing;
+
+    const promise = (async () => {
+      let claimed;
+      try {
+        claimed = await claimBalanceAttempt(key);
+      } catch (error) {
+        return balanceOperationFailure(error);
+      }
+      if (!claimed?.ok) return claimed;
+      const attempt = claimed.attempt;
+      try {
+        return await operation(attempt, claimed.site);
+      } catch (error) {
+        return balanceOperationFailure(error);
+      } finally {
+        await finishBalanceAttempt(attempt);
+      }
+    })();
+    activeSiteBalanceRefreshes.set(key, promise);
+    promise.finally(() => {
+      if (activeSiteBalanceRefreshes.get(key) === promise) activeSiteBalanceRefreshes.delete(key);
+    }).catch(() => undefined);
+    return promise;
+  }
+
+  function isBalanceAttemptAbort(result) {
+    return ['site_not_found', 'site_domain_changed', 'balance_attempt_stale',
+      'balance_attempt_cancelled', 'site_changed_during_refresh'].includes(result?.code);
+  }
+
 /** 余额读取：多轮重试（SPA 渲染慢） */
 async function scrapeBalanceWithRetry(tabId, type, rounds = 4, options = {}) {
+  const { beforeAttempt, ...requestOptions } = options || {};
   let last = { ok: false, error: 'no attempt' };
   for (let i = 0; i < rounds; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, 900));
+    if (typeof beforeAttempt === 'function') {
+      const guard = await beforeAttempt(i);
+      if (guard?.ok === false) return guard;
+    }
     last = typeof scrapeTabBalanceAndKeys === 'function'
-      ? await scrapeTabBalanceAndKeys(tabId, type, options)
-      : await fetchSiteBalance({ type, quotaPerUnit: options.quotaPerUnit }, { tabId, ...options });
+      ? await scrapeTabBalanceAndKeys(tabId, type, requestOptions)
+      : await fetchSiteBalance({ type, quotaPerUnit: requestOptions.quotaPerUnit }, { tabId, ...requestOptions });
     if (last?.ok && (last.balance || last.usage)) return last;
   }
   return last;
@@ -26,6 +175,14 @@ const MAX_OWNED_TEMP_TABS = 2;
 
 function balanceFailureMessage(error) {
   return String(error || '余额获取失败').replace(/\s+/g, ' ').trim().slice(0, 200) || '余额获取失败';
+}
+
+function balanceLogErrorCode(error) {
+  const code = String(error?.code || error?.name || 'operation_failed')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 40);
+  return code || 'operation_failed';
 }
 
 function classifySiteBalanceError(error, code) {
@@ -99,22 +256,44 @@ function recordBalanceSuccess(site, result) {
 }
 
 async function refreshSiteBalance(siteId) {
-  const sites = await loadSites();
-  let site = sites.find((s) => s.id === siteId);
-  if (!site) return { ok: false, error: '站点不存在' };
+  return coordinateSiteBalanceRefresh(siteId, (attempt, claimedSite) =>
+    refreshSiteBalanceInternal(attempt, claimedSite));
+}
+
+async function refreshSiteBalanceInternal(attempt, claimedSite = null) {
+  let checked = await loadCurrentBalanceSite(attempt);
+  if (!checked.ok) return checked;
+  // claimedSite 只用于让协调器完成原子 claim；请求始终以 guard 重读的最新站点为准。
+  void claimedSite;
+  let site = checked.site;
   const access = await ensureAccessForSite(site, { request: false });
   if (!access.ok) return access;
 
+  let detectionPatch = {};
+  const refreshCurrentSite = async () => {
+    const current = await loadCurrentBalanceSite(attempt);
+    if (current.ok) {
+      site = { ...current.site, ...detectionPatch };
+    }
+    return current;
+  };
+
   if (!site.type || site.type === 'auto') {
+    checked = await refreshCurrentSite();
+    if (!checked.ok) return checked;
     const detection = await detectSite(site.pageUrl || site.baseUrl || site.domain, {
-      hintName: site.name
+      hintName: site.name,
+      expectedOrigin: attempt.expectedOrigin
     });
     if (detection.ok && detection.type && detection.type !== 'auto') {
-      site.type = detection.type;
-      if (detection.name && site.name === site.domain) site.name = detection.name;
-      if (detection.pageUrl) site.pageUrl = detection.pageUrl;
-      site.detectSummary = detection.summary || site.detectSummary;
-      site.detectConfidence = detection.confidence || site.detectConfidence;
+      detectionPatch = {
+        type: detection.type,
+        ...(detection.name && site.name === site.domain ? { name: detection.name } : {}),
+        ...(detection.pageUrl ? { pageUrl: detection.pageUrl } : {}),
+        ...(detection.summary ? { detectSummary: detection.summary } : {}),
+        ...(detection.confidence ? { detectConfidence: detection.confidence } : {})
+      };
+      site = { ...site, ...detectionPatch };
     }
   }
 
@@ -129,6 +308,8 @@ async function refreshSiteBalance(siteId) {
       let tabId = null;
       let temporaryTab = false;
 
+      const freshBeforeTab = await refreshCurrentSite();
+      if (!freshBeforeTab.ok) return freshBeforeTab;
       const ensured = await ensureSiteTab(site, { preferPersonal: false });
       tabId = ensured.tabId;
       temporaryTab = ensured.temporary;
@@ -148,17 +329,25 @@ async function refreshSiteBalance(siteId) {
       }
 
       await new Promise((r) => setTimeout(r, temporaryTab ? 1200 : 300));
-      const session = await readPageAuthSession(site.domain, siteOrigin(site));
+      const freshBeforeSession = await refreshCurrentSite();
+      if (!freshBeforeSession.ok) return freshBeforeSession;
+      // 余额请求和会话必须来自同一标签页；同 Origin 多账号时不能回退到另一页。
+      const session = await readPageAuthSession(site.domain, siteOrigin(site), tabId);
       const balOpts = { quotaPerUnit: site.quotaPerUnit, expectedOrigin: siteOrigin(site) };
 
       let balanceResult = await scrapeBalanceWithRetry(
         tabId,
         site.type || 'newapi',
         temporaryTab ? 5 : 3,
-        balOpts
+        {
+          ...balOpts,
+          beforeAttempt: refreshCurrentSite
+        }
       );
 
       if (!balanceResult?.ok) {
+        const freshBeforeFetch = await refreshCurrentSite();
+        if (!freshBeforeFetch.ok) return freshBeforeFetch;
         balanceResult = await fetchSiteBalance(site, {
           pageToken: session.token,
           newApiUserId: session.userId || balanceResult?.userId,
@@ -169,12 +358,21 @@ async function refreshSiteBalance(siteId) {
 
       // 已有标签读不到时：另开临时页再试（仍不碰用户原标签）
       if (!balanceResult?.ok && !temporaryTab) {
+        const freshBeforeTemp = await refreshCurrentSite();
+        if (!freshBeforeTemp.ok) return freshBeforeTemp;
         const temp = await openOwnedTempTab(site, personalUrls(site), ownedTempTabs);
         if (temp.tabId) {
           await new Promise((r) => setTimeout(r, 1500));
-          const retry = await scrapeBalanceWithRetry(temp.tabId, site.type || 'newapi', 5, balOpts);
+          const freshBeforeRetry = await refreshCurrentSite();
+          if (!freshBeforeRetry.ok) return freshBeforeRetry;
+          const retry = await scrapeBalanceWithRetry(temp.tabId, site.type || 'newapi', 5, {
+            ...balOpts,
+            beforeAttempt: refreshCurrentSite
+          });
           if (retry?.ok) balanceResult = retry;
           else {
+            const freshBeforeAgain = await refreshCurrentSite();
+            if (!freshBeforeAgain.ok) return freshBeforeAgain;
             const again = await fetchSiteBalance(site, {
               pageToken: session.token,
               newApiUserId: session.userId || retry?.userId,
@@ -187,13 +385,19 @@ async function refreshSiteBalance(siteId) {
         }
       } else if (!balanceResult?.ok && temporaryTab && tabId) {
         await new Promise((r) => setTimeout(r, 1500));
-        const retry = await scrapeTabBalanceAndKeys(tabId, site.type || 'newapi', balOpts);
+        const freshBeforeRetry = await refreshCurrentSite();
+        if (!freshBeforeRetry.ok) return freshBeforeRetry;
+        const retry = await scrapeBalanceWithRetry(tabId, site.type || 'newapi', 1, {
+          ...balOpts,
+          beforeAttempt: refreshCurrentSite
+        });
         if (retry?.ok) balanceResult = retry;
       }
 
       return balanceResult || { ok: false, code: 'refresh_failed', error: '余额获取失败' };
     })(), SITE_BALANCE_TIMEOUT_MS);
   } catch (error) {
+    if (error?.code === 'timeout') attempt.cancelled = true;
     const classified = classifySiteBalanceError(
       error?.message || error,
       error?.code || 'timeout'
@@ -214,19 +418,47 @@ async function refreshSiteBalance(siteId) {
       error: classified.message,
       action: classified.action
     };
-    site = await persistBalanceResult(site, result);
+    if (isBalanceAttemptAbort(result)) return result;
+    try {
+      site = await persistBalanceResult(site, result, { attemptId: attempt.attemptId });
+    } catch (persistError) {
+      console.warn('[公益站收藏] 余额结果落库失败', balanceLogErrorCode(persistError));
+      return { ok: false, code: 'balance_persist_failed', error: '余额结果保存失败' };
+    }
+    if (!site) {
+      return balanceAttemptFailure(
+        'site_changed_during_refresh',
+        '站点在刷新期间已删除或修改，未写入过期余额结果'
+      );
+    }
     return {
       ok: false,
       code: result.code,
       error: result.error,
       action: result.action,
       site,
-      debug: { hasUser: result.hasUser, href: result.href, via: result.via }
+      // 仅保留受控诊断字段；页面 href 可能带 query/hash 或临时令牌，不能回传到 UI。
+      debug: {
+        hasUser: result.hasUser === true,
+        via: /^[a-z0-9_-]{1,40}$/i.test(String(result.via || '')) ? String(result.via) : ''
+      }
     };
   }
 
   // 不要把 pageUrl 改成临时个人中心，避免「打开」进 404
-  site = await persistBalanceResult(site, result);
+  if (isBalanceAttemptAbort(result)) return result;
+  try {
+    site = await persistBalanceResult(site, result, { attemptId: attempt.attemptId });
+  } catch (persistError) {
+    console.warn('[公益站收藏] 余额结果落库失败', balanceLogErrorCode(persistError));
+    return { ok: false, code: 'balance_persist_failed', error: '余额结果保存失败' };
+  }
+  if (!site) {
+    return balanceAttemptFailure(
+      'site_changed_during_refresh',
+      '站点在刷新期间已删除或修改，未写入过期余额结果'
+    );
+  }
   return {
     ok: true,
     site,
@@ -396,6 +628,149 @@ async function retryFailedBalances() {
   };
 }
 
+// 批量刷新使用较轻的 fetch 路径，但仍复用单站的 siteId 协调器与 attempt
+// 校验。单站刷新先开始时，批量会直接等待同一 Promise，反之亦然。
+async function refreshBatchSiteBalanceInternal(attempt, claimedSite = null) {
+  void claimedSite;
+  let checked = await loadCurrentBalanceSite(attempt);
+  if (!checked.ok) return { id: attempt.siteId, ...checked };
+  let site = checked.site;
+  let detectionPatch = {};
+  let ensured = null;
+  let balanceResult = null;
+  const refreshCurrentSite = async () => {
+    const current = await loadCurrentBalanceSite(attempt);
+    if (current.ok) site = { ...current.site, ...detectionPatch };
+    return current;
+  };
+
+  try {
+    const access = await ensureAccessForSite(site, { request: false });
+    if (!access.ok) {
+      return {
+        id: attempt.siteId,
+        ok: false,
+        skipped: true,
+        code: access.code || 'site_permission_denied',
+        error: access.error || '未获得站点访问权限'
+      };
+    }
+    if (!site.type || site.type === 'auto') {
+      checked = await refreshCurrentSite();
+      if (!checked.ok) return { id: attempt.siteId, ...checked };
+      const detection = await detectSite(site.pageUrl || site.baseUrl || site.domain, {
+        hintName: site.name,
+        expectedOrigin: attempt.expectedOrigin
+      });
+      if (detection.ok && detection.type && detection.type !== 'auto') {
+        detectionPatch = {
+          type: detection.type,
+          ...(detection.name && site.name === site.domain ? { name: detection.name } : {}),
+          ...(detection.summary ? { detectSummary: detection.summary } : {}),
+          ...(detection.confidence ? { detectConfidence: detection.confidence } : {})
+        };
+        site = { ...site, ...detectionPatch };
+      }
+    }
+
+    checked = await refreshCurrentSite();
+    if (!checked.ok) return { id: attempt.siteId, ...checked };
+    const initialSession = await readPageAuthSession(site.domain, siteOrigin(site));
+    checked = await refreshCurrentSite();
+    if (!checked.ok) return { id: attempt.siteId, ...checked };
+    ensured = await ensureSiteTab(site, { preferPersonal: false });
+    const tabId = ensured?.tabId;
+    const session = tabId
+      ? await readPageAuthSession(site.domain, siteOrigin(site), tabId)
+      : initialSession;
+    // 批量路径保留旧兼容行为：fetchSiteBalance 可在没有标签 ID 时使用
+    // page/session 或测试夹具完成请求；不要把“无标签”提前变成失败。
+    checked = await refreshCurrentSite();
+    if (!checked.ok) return { id: attempt.siteId, ...checked };
+    balanceResult = await withTimeout(
+      fetchSiteBalance(site, {
+        pageToken: session?.token,
+        newApiUserId: session?.userId,
+        tabId,
+        quotaPerUnit: site.quotaPerUnit,
+        expectedOrigin: attempt.expectedOrigin
+      }),
+      SITE_BALANCE_TIMEOUT_MS
+    );
+
+    if (!balanceResult?.ok) {
+      const classified = classifySiteBalanceError(balanceResult?.error, balanceResult?.code);
+      balanceResult = { ...balanceResult, ...classified, ok: false };
+    }
+    if (isBalanceAttemptAbort(balanceResult)) {
+      return { id: attempt.siteId, ...balanceResult };
+    }
+    let persisted;
+    try {
+      persisted = await persistBalanceResult(site, balanceResult, { attemptId: attempt.attemptId });
+    } catch (persistError) {
+      console.warn('[公益站收藏] 余额结果落库失败', balanceLogErrorCode(persistError));
+      return {
+        id: attempt.siteId,
+        ok: false,
+        code: 'balance_persist_failed',
+        error: '余额结果保存失败'
+      };
+    }
+    if (!persisted) {
+      return {
+        id: attempt.siteId,
+        ...balanceAttemptFailure(
+          'site_changed_during_refresh',
+          '站点在刷新期间已删除或修改，未写入过期余额结果'
+        )
+      };
+    }
+    return {
+      id: attempt.siteId,
+      ok: !!balanceResult.ok,
+      ...(balanceResult.ok ? {
+        balance: balanceResult.balance,
+        usage: balanceResult.usage,
+        via: balanceResult.via
+      } : {
+        code: balanceResult.code,
+        error: balanceResult.error,
+        action: balanceResult.action
+      }),
+      site: persisted
+    };
+  } catch (error) {
+    if (error?.code === 'timeout') attempt.cancelled = true;
+    const classified = classifySiteBalanceError(error?.message || error, error?.code || 'timeout');
+    if (isBalanceAttemptAbort(classified)) return { id: attempt.siteId, ...classified };
+    const failed = { ok: false, ...classified };
+    try {
+      const persisted = await persistBalanceResult(site, failed, { attemptId: attempt.attemptId });
+      if (!persisted) {
+        return {
+          id: attempt.siteId,
+          ...balanceAttemptFailure(
+            'site_changed_during_refresh',
+            '站点在刷新期间已删除或修改，未写入过期余额结果'
+          )
+        };
+      }
+      return { id: attempt.siteId, ...failed, site: persisted };
+    } catch (persistError) {
+      console.warn('[公益站收藏] 余额结果落库失败', balanceLogErrorCode(persistError));
+      return {
+        id: attempt.siteId,
+        ok: false,
+        code: 'balance_persist_failed',
+        error: '余额结果保存失败'
+      };
+    }
+  } finally {
+    if (ensured?.temporary && ensured.tabId) await closeTabSafe(ensured.tabId);
+  }
+}
+
 async function refreshAllBalancesInternal({
   restart = false,
   siteIds = null,
@@ -478,95 +853,17 @@ async function refreshAllBalancesInternal({
   let processedCount = 0;
   for (const [index, site] of orderedSites.entries()) {
     if (run.stopRequested) break;
-    let ensured = null;
-    let balanceResult = null;
-    let latest = null;
-    try {
-      const access = await ensureAccessForSite(site, { request: false });
-      if (!access.ok) {
-        latest = {
-          id: site.id,
-          ok: false,
-          skipped: true,
-          code: access.code || 'site_permission_denied',
-          error: access.error || '未获得站点访问权限'
-        };
-      } else {
-        if (!site.type || site.type === 'auto') {
-          const detection = await detectSite(site.pageUrl || site.baseUrl || site.domain, {
-            hintName: site.name
-          });
-          if (detection.ok && detection.type && detection.type !== 'auto') {
-            site.type = detection.type;
-            if (detection.name && site.name === site.domain) site.name = detection.name;
-          }
-        }
-        const session = await readPageAuthSession(site.domain, siteOrigin(site));
-        // 不改写用户标签；没有同域页时才后台临时打开
-        ensured = await ensureSiteTab(site, { preferPersonal: false });
-        const tabId = ensured.tabId;
-        balanceResult = await withTimeout(
-          fetchSiteBalance(site, {
-            pageToken: session.token,
-            newApiUserId: session.userId,
-            tabId,
-            quotaPerUnit: site.quotaPerUnit,
-            expectedOrigin: siteOrigin(site)
-          }),
-          SITE_BALANCE_TIMEOUT_MS
-        );
-
-        if (balanceResult.ok) {
-          latest = {
-            id: site.id,
-            ok: true,
-            balance: balanceResult.balance,
-            usage: balanceResult.usage,
-            via: balanceResult.via
-          };
-        } else {
-          const classified = classifySiteBalanceError(balanceResult.error, balanceResult.code);
-          latest = {
-            id: site.id,
-            ok: false,
-            error: classified.message,
-            code: classified.code,
-            action: classified.action
-          };
-          balanceResult = { ...balanceResult, ...classified, ok: false };
-        }
-        try {
-          await persistBalanceResult(site, balanceResult);
-        } catch (persistError) {
-          latest = {
-            id: site.id,
-            ok: false,
-            code: 'balance_persist_failed',
-            error: '余额结果保存失败'
-          };
-          console.warn('[公益站收藏] 余额结果落库失败', persistError);
-        }
-      }
-    } catch (e) {
-      const classified = classifySiteBalanceError(e?.message || e, e?.code || 'timeout');
-      balanceResult = {
-        ok: false,
-        code: classified.code,
-        error: classified.message,
-        action: classified.action
-      };
-      latest = { id: site.id, ok: false, ...balanceResult };
-      try {
-        await persistBalanceResult(site, balanceResult);
-      } catch (persistError) {
-        console.warn('[公益站收藏] 余额结果落库失败', persistError);
-      }
-    } finally {
-      if (ensured?.temporary && ensured.tabId) {
-        await closeTabSafe(ensured.tabId);
-      }
+    const coordinated = await coordinateSiteBalanceRefresh(
+      site.id,
+      (attempt, claimedSite) => refreshBatchSiteBalanceInternal(attempt, claimedSite)
+    );
+    let latest = coordinated ? { ...coordinated, id: site.id } : null;
+    if (latest && !latest.ok && ['site_permission_required', 'site_permission_denied', 'permission_denied']
+      .includes(latest.code)) {
+      latest.skipped = true;
     }
     if (!latest) {
+      // 协调器理论上总会返回结果；保留兜底以维持进度计数契约。
       latest = {
         id: site.id,
         ok: false,
@@ -633,6 +930,8 @@ async function refreshAllBalancesInternal({
 
   root.scrapeBalanceWithRetry = scrapeBalanceWithRetry;
   root.refreshSiteBalance = refreshSiteBalance;
+  root.refreshSiteBalanceInternal = refreshSiteBalanceInternal;
+  root.coordinateSiteBalanceRefresh = coordinateSiteBalanceRefresh;
   root.getBalanceRefreshProgress = getBalanceRefreshProgress;
   root.refreshAllBalances = refreshAllBalances;
   root.stopBalanceRefresh = stopBalanceRefresh;
@@ -650,6 +949,8 @@ async function refreshAllBalancesInternal({
     module.exports = {
       scrapeBalanceWithRetry,
       refreshSiteBalance,
+      refreshSiteBalanceInternal,
+      coordinateSiteBalanceRefresh,
       getBalanceRefreshProgress,
       refreshAllBalances,
       stopBalanceRefresh,

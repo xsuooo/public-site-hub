@@ -1,6 +1,17 @@
 (function (root) {
   const EXPORT_VERSION = 1;
   const APP_ID = 'public-site-hub';
+  const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+  const MAX_IMPORT_SITES = 1000;
+
+  function utf8ByteLength(value) {
+    let bytes = 0;
+    for (const character of String(value || '')) {
+      const point = character.codePointAt(0);
+      bytes += point <= 0x7f ? 1 : (point <= 0x7ff ? 2 : (point <= 0xffff ? 3 : 4));
+    }
+    return bytes;
+  }
 
   function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -279,6 +290,11 @@
   function parseImportText(text) {
     const raw = String(text || '').trim();
     if (!raw) throw new Error('空内容');
+    if (utf8ByteLength(raw) > MAX_IMPORT_BYTES) {
+      const error = new Error('导入内容超过 2 MB 上限，请拆分后再导入');
+      error.code = 'import_too_large';
+      throw error;
+    }
     let config;
     try {
       config = JSON.parse(raw);
@@ -287,11 +303,20 @@
     }
     const parsed = adaptImportConfig(config);
     if (!parsed.format) throw new Error('不支持的导入格式');
+    const sourceCount = Number(parsed.sourceCount) || parsed.sites?.length || 0;
+    if (sourceCount > MAX_IMPORT_SITES || parsed.sites?.length > MAX_IMPORT_SITES) {
+      const error = new Error(`单次最多导入 ${MAX_IMPORT_SITES} 个站点，请拆分后再导入`);
+      error.code = 'import_too_many_sites';
+      throw error;
+    }
     return parsed;
   }
 
   root.EXPORT_VERSION = EXPORT_VERSION;
   root.APP_ID = APP_ID;
+  root.MAX_IMPORT_BYTES = MAX_IMPORT_BYTES;
+  root.MAX_IMPORT_SITES = MAX_IMPORT_SITES;
+  root.utf8ImportByteLength = utf8ByteLength;
   root.buildExportConfig = buildExportConfig;
   root.buildCheckinExportConfig = buildCheckinExportConfig;
   root.adaptImportConfig = adaptImportConfig;
@@ -302,6 +327,9 @@
     module.exports = {
       EXPORT_VERSION,
       APP_ID,
+      MAX_IMPORT_BYTES,
+      MAX_IMPORT_SITES,
+      utf8ByteLength,
       buildExportConfig,
       buildCheckinExportConfig,
       adaptImportConfig,

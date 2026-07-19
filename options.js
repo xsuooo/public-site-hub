@@ -1,27 +1,50 @@
-/* global filterSites, filterSitesByQuery, maskKey, categoryLabel, formatClientSnippet, openUrlForSite, isCompleteApiKey, requestSiteAccessFromGesture */
+/* global filterSites, filterSitesByQuery, maskKey, categoryLabel, formatClientSnippet, openUrlForSite, isCompleteApiKey, requestSiteAccessFromGesture, deriveSiteHealth, collectSiteTags */
 
 const $ = (id) => document.getElementById(id);
 const send = PublicSiteUi.sendMessage;
 const escapeHtml = PublicSiteUi.escapeHtml;
 const escapeAttr = PublicSiteUi.escapeAttr;
 const hasCompleteKeyValue = PublicSiteUi.isUsableKey;
+const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
+const IMPORT_MAX_SITES = 1000;
 const state = {
   sites: [],
   query: '',
   categoryFilter: 'all',
+  tagFilter: 'all',
+  sortOrder: 'current',
   editingId: null,
   selected: new Set(),
   importBusy: false,
   importPreview: null,
   importPreviewText: '',
+  importPreviewUpdatedAt: null,
+  siteDataUpdatedAt: 0,
   latestImportBackup: null,
   latestDiagnostics: null,
   balanceRefreshProgress: null,
+  balanceStopPendingRunId: '',
+  balanceStopFocusPending: false,
+  editingBaseline: null,
   currentView: 'sites',
   drawerMode: null,
   drawerReturnFocus: null,
   openRowMenuId: null
 };
+
+function utf8ByteLength(value) {
+  let bytes = 0;
+  for (const character of String(value || '')) {
+    const point = character.codePointAt(0);
+    bytes += point <= 0x7f ? 1 : (point <= 0x7ff ? 2 : (point <= 0xffff ? 3 : 4));
+  }
+  return bytes;
+}
+
+function importSizeError(text) {
+  if (utf8ByteLength(text) > IMPORT_MAX_BYTES) return '导入内容超过 2 MB 上限，请拆分后再导入';
+  return '';
+}
 
 function splitPermissionInputs(text) {
   return String(text || '')
@@ -108,8 +131,16 @@ function focusableIn(container) {
   )).filter((item) => item.getClientRects().length > 0);
 }
 
+function clearCredentialInputs() {
+  for (const id of ['addKey', 'newKeyValue']) {
+    const input = $(id);
+    if (input) input.value = '';
+  }
+}
+
 function setDrawerMode(mode) {
   const drawer = $('editor');
+  clearCredentialInputs();
   drawer.dataset.mode = mode;
   document.querySelectorAll('[data-drawer-panel]').forEach((panel) => {
     panel.hidden = panel.dataset.drawerPanel !== mode;
@@ -142,6 +173,7 @@ function openDrawer(mode, trigger = document.activeElement) {
 
 function closeDrawer({ restoreFocus = true, updateRoute = true } = {}) {
   const drawer = $('editor');
+  clearCredentialInputs();
   if (drawer.hidden) return;
   drawer.hidden = true;
   $('drawerScrim').hidden = true;
@@ -217,7 +249,22 @@ function resolveOptionsErrorAction(res, siteId, retryType) {
     };
   }
   if (siteId && (code === 'wrong_type' || res?.action === 'redetect')) {
-    return { label: '重新识别', run: () => retryType === 'redetectSite' ? retry() : send('redetectSite', { id: siteId }) };
+    return {
+      label: '重新识别',
+      run: async () => {
+        const target = permissionSite(siteId);
+        if (target && !(await requestOptionsAccessFromGesture([target]))) return;
+        const again = await send('redetectSite', { id: siteId });
+        if (!again.ok) {
+          setStatus(again.error || '识别失败', 'err', resolveOptionsErrorAction(again, siteId, 'redetectSite'));
+          return;
+        }
+        state.sites = again.sites || state.sites;
+        renderList();
+        if (state.editingId === siteId) fillEditor(state.sites.find((item) => item.id === siteId));
+        setStatus(again.detection?.summary || '识别完成', 'ok');
+      }
+    };
   }
   if (siteId && ['not_logged_in', 'network_error', 'timeout', 'parse_failed', 'tab_open_failed'].includes(code)) {
     return {
@@ -268,27 +315,84 @@ function resolveInputAction(res, mode) {
   };
 }
 
+function applyBalanceRefreshProgress(next) {
+  const incoming = next || null;
+  const pendingRunId = String(state.balanceStopPendingRunId || '');
+  if (pendingRunId
+    && incoming?.runId === pendingRunId
+    && incoming?.status === 'running') {
+    return false;
+  }
+  state.balanceRefreshProgress = incoming;
+  if (pendingRunId && (
+    !incoming
+    || incoming.runId !== pendingRunId
+    || !['running', 'stopping'].includes(incoming.status)
+  )) {
+    state.balanceStopPendingRunId = '';
+  }
+  return true;
+}
+
 function renderBalanceProgress() {
   const progress = state.balanceRefreshProgress || {};
   const el = $('balanceProgress');
   if (!el) return;
+  const status = String(progress.status || 'idle');
   const total = Number(progress.total) || 0;
   const completed = Math.min(total, Number(progress.completed) || 0);
-  const isVisible = ['running', 'interrupted'].includes(progress.status)
-    || (progress.status === 'completed' && total > 0);
+  const isActive = ['running', 'stopping'].includes(status);
+  const isVisible = isActive
+    || ['interrupted', 'stopped'].includes(status)
+    || (status === 'completed' && total > 0);
+  const stopButton = $('stopBalanceRefresh');
+  const refreshButton = $('refreshAll');
+  const bar = $('balanceProgressBar');
+  const stopHadFocus = document.activeElement === stopButton;
   el.hidden = !isVisible;
+  bar?.setAttribute('aria-busy', String(isActive));
+  if (refreshButton) refreshButton.disabled = isActive;
+  if (stopButton) {
+    stopButton.hidden = !isActive;
+    stopButton.disabled = status === 'stopping' || !progress.runId;
+    stopButton.textContent = status === 'stopping' ? '正在停止' : '停止';
+    stopButton.setAttribute(
+      'aria-label',
+      status === 'stopping' ? '正在停止余额刷新' : '停止余额刷新'
+    );
+  }
+  if (stopHadFocus && !isActive) state.balanceStopFocusPending = true;
+  if (state.balanceStopFocusPending && !isActive) {
+    queueMicrotask(() => {
+      const target = isVisible ? el : refreshButton;
+      if (!target || target.disabled) return;
+      target.focus();
+      state.balanceStopFocusPending = false;
+    });
+  }
   if (!isVisible) return;
-  $('balanceProgressBar').max = Math.max(total, 1);
-  $('balanceProgressBar').value = completed;
+  bar.max = Math.max(total, 1);
+  bar.value = completed;
   $('balanceProgressCount').textContent = `${completed}/${total}`;
-  if (progress.status === 'running') {
+  const skipped = Number(progress.skipped) || 0;
+  const summary = `成功 ${Number(progress.succeeded) || 0}，失败 ${Number(progress.failed) || 0}，跳过 ${skipped}`;
+  if (status === 'running') {
     const current = progress.currentSiteName ? ` · 正在处理 ${progress.currentSiteName}` : '';
-    $('balanceProgressText').textContent = `刷新余额中：成功 ${Number(progress.succeeded) || 0}，失败 ${Number(progress.failed) || 0}，跳过 ${Number(progress.skipped) || 0}${current}`;
-  } else if (progress.status === 'interrupted') {
-    const pending = Array.isArray(progress.pendingSiteIds) ? progress.pendingSiteIds.length : 0;
-    $('balanceProgressText').textContent = `余额刷新已中断，剩余 ${pending} 个站点；再次点击“刷新全部余额”可继续`;
+    $('balanceProgressText').textContent = `刷新余额中：${summary}${current}`;
+  } else if (status === 'stopping') {
+    $('balanceProgressText').textContent = '正在停止余额刷新；当前站点处理完成后结束';
+  } else if (status === 'stopped') {
+    const pending = Array.isArray(progress.pendingSiteIds)
+      ? progress.pendingSiteIds.length
+      : Math.max(0, total - completed);
+    $('balanceProgressText').textContent = `余额刷新已停止，剩余 ${pending} 个站点；点击“刷新全部余额”可继续`;
+  } else if (status === 'interrupted') {
+    const pending = Array.isArray(progress.pendingSiteIds)
+      ? progress.pendingSiteIds.length
+      : Math.max(0, total - completed);
+    $('balanceProgressText').textContent = `余额刷新已中断，剩余 ${pending} 个站点；点击“刷新全部余额”可继续`;
   } else {
-    $('balanceProgressText').textContent = `余额刷新完成：成功 ${Number(progress.succeeded) || 0}，失败 ${Number(progress.failed) || 0}，跳过 ${Number(progress.skipped) || 0}`;
+    $('balanceProgressText').textContent = `余额刷新完成：${summary}`;
   }
 }
 
@@ -338,13 +442,88 @@ async function refreshLatestImportBackup() {
   if (clear) clear.disabled = backups.length === 0;
 }
 
-function visibleSites() {
-  if (typeof filterSites === 'function') {
-    return filterSites(state.sites, { query: state.query, category: state.categoryFilter });
+function siteHealth(site) {
+  if (typeof deriveSiteHealth === 'function') {
+    return deriveSiteHealth(site, { includeCheckin: false });
   }
-  return typeof filterSitesByQuery === 'function'
-    ? filterSitesByQuery(state.sites, state.query)
-    : state.sites.slice();
+  if (site?.balanceStatus?.status === 'failed') {
+    return { level: 'failed', label: '余额失败', tone: 'danger' };
+  }
+  if (!site?.balanceUpdatedAt && !site?.balanceStatus?.lastSuccessAt) {
+    return { level: 'needsAttention', label: '未查余额', tone: 'warning' };
+  }
+  return { level: 'healthy', label: '正常', tone: 'success' };
+}
+
+function siteUpdatedAt(site) {
+  return Number(
+    site?.balanceStatus?.lastSuccessAt
+      || site?.balanceUpdatedAt
+      || site?.updatedAt
+      || site?.createdAt
+      || 0
+  ) || 0;
+}
+
+function renderListFilters() {
+  const tagSelect = $('listTag');
+  if (tagSelect) {
+    const tags = typeof collectSiteTags === 'function'
+      ? collectSiteTags(state.sites, { limit: 32 })
+      : [];
+    const known = new Set(tags.map((item) => String(item.tag).toLowerCase()));
+    if (state.tagFilter !== 'all' && !known.has(String(state.tagFilter).toLowerCase())) {
+      state.tagFilter = 'all';
+    }
+    tagSelect.innerHTML = [
+      '<option value="all">全部标签</option>',
+      ...tags.map((item) => `<option value="${escapeAttr(item.tag)}">#${escapeHtml(item.tag)}（${Number(item.count) || 0}）</option>`)
+    ].join('');
+    tagSelect.value = state.tagFilter;
+  }
+  const sortSelect = $('listSort');
+  if (sortSelect) sortSelect.value = state.sortOrder;
+  const categorySelect = $('listCategory');
+  if (categorySelect) categorySelect.value = state.categoryFilter;
+}
+
+function visibleSites() {
+  let sites;
+  if (typeof filterSites === 'function') {
+    sites = filterSites(state.sites, {
+      query: state.query,
+      category: state.categoryFilter,
+      tag: state.tagFilter
+    });
+  } else {
+    sites = typeof filterSitesByQuery === 'function'
+      ? filterSitesByQuery(state.sites, state.query)
+      : state.sites.slice();
+    if (state.categoryFilter !== 'all') {
+      sites = sites.filter((site) => site.category === state.categoryFilter);
+    }
+    if (state.tagFilter !== 'all') {
+      const tag = String(state.tagFilter).toLowerCase();
+      sites = sites.filter((site) => (site.tags || []).some((item) => String(item).toLowerCase() === tag));
+    }
+  }
+  const sortOrder = state.sortOrder;
+  if (sortOrder === 'name') {
+    sites.sort((a, b) => String(a.name || a.domain || '').localeCompare(
+      String(b.name || b.domain || ''), 'zh'
+    ));
+  } else if (sortOrder === 'updated') {
+    sites.sort((a, b) => siteUpdatedAt(b) - siteUpdatedAt(a));
+  } else if (sortOrder === 'health') {
+    const rank = { failed: 0, needsAttention: 1, healthy: 2 };
+    sites.sort((a, b) => {
+      const levelDiff = (rank[siteHealth(a).level] ?? 3) - (rank[siteHealth(b).level] ?? 3);
+      return levelDiff || String(a.name || a.domain || '').localeCompare(
+        String(b.name || b.domain || ''), 'zh'
+      );
+    });
+  }
+  return sites;
 }
 
 function catText(site) {
@@ -352,12 +531,23 @@ function catText(site) {
   return site.category === 'relay' ? '中转站' : '公益站';
 }
 
-function updateBulkBar() {
+function reconcileSelection(sites = visibleSites()) {
+  const visibleIds = new Set(sites.map((site) => site.id));
+  for (const id of [...state.selected]) {
+    if (!visibleIds.has(id)) state.selected.delete(id);
+  }
+}
+
+function updateBulkBar(sites = visibleSites()) {
   const bar = $('bulkBar');
-  const n = state.selected.size;
+  const visibleIds = new Set(sites.map((site) => site.id));
+  const n = [...state.selected].filter((id) => visibleIds.has(id)).length;
   if (!bar) return;
   bar.classList.toggle('show', n > 0);
   if ($('bulkCount')) $('bulkCount').textContent = `已选 ${n}`;
+  const deleteButton = $('bulkDelete');
+  if (deleteButton) deleteButton.disabled = n === 0;
+  bar.setAttribute('aria-label', n ? `已选 ${n} 个当前筛选站点` : '批量操作');
 }
 
 function safeDomIdPart(value) {
@@ -404,14 +594,16 @@ function closeRowMenu({ restoreFocus = false } = {}) {
 
 function renderList() {
   const list = $('siteList');
+  renderListFilters();
   const sites = visibleSites();
+  reconcileSelection(sites);
   if ($('listCount')) {
     $('listCount').textContent = state.sites.length
       ? `${sites.length} / ${state.sites.length}`
       : '0';
   }
   if ($('navSiteCount')) $('navSiteCount').textContent = String(state.sites.length);
-  updateBulkBar();
+  updateBulkBar(sites);
 
   if (!state.sites.length) {
     list.innerHTML = '<div class="empty">暂无站点。点击“添加站点”，或从 Popup 收藏当前页。</div>';
@@ -426,6 +618,8 @@ function renderList() {
   list.innerHTML = sites.map((site) => {
     const active = site.id === state.editingId ? 'active' : '';
     const balanceFailed = site.balanceStatus?.status === 'failed';
+    const health = siteHealth(site);
+    const healthTone = ['success', 'warning', 'danger'].includes(health.tone) ? health.tone : 'warning';
     const balance = site.balance || (balanceFailed ? '余额失败' : '—');
     const usableKeys = (site.keys || []).filter((key) => hasCompleteKeyValue(key?.key)).length;
     const maskedKeys = Math.max(0, (site.keys || []).length - usableKeys);
@@ -454,6 +648,7 @@ function renderList() {
       </div>
       <div class="table-balance"><strong>${escapeHtml(balance)}</strong><small>${escapeHtml(balanceLabel)}</small></div>
       <div class="table-key">${usableKeys ? `${usableKeys} 个可用` : 'Key 可选'}${maskedKeys ? `<br>${maskedKeys} 个待修复` : ''}</div>
+      <div class="table-health"><span class="status-pill" data-tone="${escapeAttr(healthTone)}">${escapeHtml(health.label)}</span></div>
       <div class="row-actions desktop-row-actions">
         <button type="button" class="icon-btn" data-act="edit" aria-label="编辑${escapeAttr(site.name || site.domain)}">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-.8L19 8.2 15.8 5 4.8 16zM14.5 6.3l3.2 3.2"/></svg>
@@ -471,6 +666,7 @@ function renderList() {
       <footer class="mobile-card-actions">
         <button type="button" class="btn btn-sm" data-act="copy-client">复制接口地址</button>
         <button type="button" class="btn btn-sm" data-act="open">打开站点</button>
+        <button type="button" class="btn btn-sm" data-act="refresh" aria-label="刷新${escapeAttr(site.name || site.domain)}余额">刷新余额</button>
         <button type="button" class="btn btn-sm" data-act="edit">编辑</button>
       </footer>
     </article>`;
@@ -480,10 +676,21 @@ function renderList() {
 function fillEditor(site) {
   if (!site) {
     state.editingId = null;
+    state.editingBaseline = null;
     closeDrawer({ updateRoute: state.currentView === 'sites' });
     return;
   }
   state.editingId = site.id;
+  state.editingBaseline = {
+    name: site.name || '',
+    domain: site.domain || '',
+    baseUrl: site.baseUrl || '',
+    pageUrl: site.pageUrl || '',
+    category: site.category === 'relay' ? 'relay' : 'gongyi',
+    type: site.type || 'auto',
+    note: site.note || '',
+    tags: (site.tags || []).join(', ')
+  };
   showWorkspace('sites', { updateRoute: false });
   if ($('editor').hidden) openDrawer('edit', document.activeElement);
   else setDrawerMode('edit');
@@ -499,6 +706,23 @@ function fillEditor(site) {
   $('drawerSubtitle').textContent = `${site.name || site.domain} · ${typeText(site)}`;
   renderKeys(site);
   writeRoute('sites', site.id, true);
+}
+
+function editorDraftDirty() {
+  if (state.drawerMode !== 'edit' || $('editor')?.hidden || !state.editingBaseline) return false;
+  const baseline = state.editingBaseline;
+  const current = {
+    name: $('editName')?.value || '',
+    domain: $('editDomain')?.value || '',
+    baseUrl: $('editBase')?.value || '',
+    pageUrl: $('editPage')?.value || '',
+    category: $('editCategory')?.value || 'gongyi',
+    type: $('editType')?.value || 'auto',
+    note: $('editNote')?.value || '',
+    tags: $('editTags')?.value || ''
+  };
+  return Object.keys(baseline).some((key) => String(current[key]).trim() !== String(baseline[key]).trim())
+    || Boolean($('newKeyValue')?.value?.trim());
 }
 
 function renderKeys(site) {
@@ -537,19 +761,52 @@ function renderKeys(site) {
   }).join('');
 }
 
+function applyPrefsUi(prefs = {}) {
+  const defaultCategory = prefs.defaultCategory === 'relay' ? 'relay' : 'gongyi';
+  const addCategory = $('addCategory');
+  const addDraft = state.drawerMode === 'add'
+    && addCategory
+    && addCategory.value !== (addCategory.dataset.previous || defaultCategory);
+  if (addCategory) {
+    if (!addDraft) addCategory.value = defaultCategory;
+    addCategory.dataset.previous = defaultCategory;
+  }
+  if (['all', 'gongyi', 'relay'].includes(prefs.listCategoryFilter)) {
+    state.categoryFilter = prefs.listCategoryFilter;
+    if ($('listCategory')) $('listCategory').value = state.categoryFilter;
+  }
+  const unlimited = $('preferUnlimitedAutoKey');
+  if (unlimited) unlimited.checked = prefs.preferUnlimitedAutoKey === true;
+}
+
 async function refreshPrefsUi() {
   const res = await send('getPrefs');
-  if (res.ok && res.prefs) {
-    if (res.prefs.defaultCategory && $('addCategory')) {
-      $('addCategory').value = res.prefs.defaultCategory;
-      $('addCategory').dataset.previous = res.prefs.defaultCategory;
-    }
-    if (res.prefs.listCategoryFilter) {
-      state.categoryFilter = res.prefs.listCategoryFilter;
-      if ($('listCategory')) $('listCategory').value = state.categoryFilter;
-    }
-    const unlimited = $('preferUnlimitedAutoKey');
-    if (unlimited) unlimited.checked = res.prefs.preferUnlimitedAutoKey === true;
+  if (res.ok && res.prefs) applyPrefsUi(res.prefs);
+}
+
+function applySitesSnapshot(nextSites, { external = false } = {}) {
+  const previousSite = state.editingId
+    ? state.sites.find((site) => site.id === state.editingId)
+    : null;
+  const preserveDraft = external && Boolean(previousSite) && editorDraftDirty();
+  state.sites = Array.isArray(nextSites) ? nextSites : [];
+  renderList();
+  if (!state.editingId) return;
+  const nextSite = state.sites.find((site) => site.id === state.editingId);
+  if (!nextSite) {
+    state.editingId = null;
+    state.editingBaseline = null;
+    closeDrawer({ restoreFocus: false, updateRoute: false });
+    setStatus('当前编辑站点已在另一窗口删除', 'err');
+    writeRoute('sites', '', true);
+    return;
+  }
+  if (preserveDraft) {
+    // 余额/Key 等外部字段可即时更新，但不要覆盖用户正在编辑的字段。
+    renderKeys(nextSite);
+    setStatus('站点已在另一窗口更新；当前编辑草稿已保留', '');
+  } else {
+    fillEditor(nextSite);
   }
 }
 
@@ -560,12 +817,7 @@ async function load() {
     setStatus(res.error || '加载失败', 'err');
     return;
   }
-  state.sites = res.sites || [];
-  // 清理已删选择
-  for (const id of [...state.selected]) {
-    if (!state.sites.some((s) => s.id === id)) state.selected.delete(id);
-  }
-  renderList();
+  applySitesSnapshot(res.sites || []);
   if (state.editingId) {
     const site = state.sites.find((s) => s.id === state.editingId);
     if (site) fillEditor(site);
@@ -579,9 +831,30 @@ async function load() {
 
 if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !changes.balanceRefreshProgress) return;
-    state.balanceRefreshProgress = changes.balanceRefreshProgress.newValue || null;
-    renderBalanceProgress();
+    if (areaName !== 'local') return;
+    if (changes.sites) {
+      applySitesSnapshot(changes.sites.newValue || [], { external: true });
+    }
+    if (changes.prefs?.newValue) {
+      applyPrefsUi(changes.prefs.newValue);
+      renderList();
+    }
+    if (changes.siteBackups) {
+      void refreshLatestImportBackup().catch(() => undefined);
+    }
+    if (changes.balanceRefreshProgress) {
+      if (applyBalanceRefreshProgress(changes.balanceRefreshProgress.newValue || null)) {
+        renderBalanceProgress();
+      }
+    }
+    if (changes.siteDataMeta) {
+      const nextUpdatedAt = Number(changes.siteDataMeta.newValue?.updatedAt) || 0;
+      state.siteDataUpdatedAt = nextUpdatedAt;
+      if (state.importPreview && state.importPreviewUpdatedAt !== nextUpdatedAt) {
+        resetImportPreview('站点数据已变化，请重新生成预览。');
+        setStatus('站点数据已变化，导入前请重新生成预览。', '');
+      }
+    }
   });
 }
 
@@ -608,6 +881,11 @@ async function deleteOne(site, trigger) {
 }
 
 async function deleteSelected(trigger) {
+  const current = visibleSites();
+  const currentIds = new Set(current.map((site) => site.id));
+  for (const id of [...state.selected]) {
+    if (!currentIds.has(id)) state.selected.delete(id);
+  }
   const ids = [...state.selected];
   if (!ids.length) return;
   const confirmed = await confirmAction({
@@ -620,6 +898,11 @@ async function deleteSelected(trigger) {
   setStatus(`正在删除 ${ids.length} 个…`);
   const res = await send('removeSites', { ids });
   if (!res.ok) {
+    // 只有没有结构化错误码的旧 Worker 才走兼容回退；新错误必须保持整批原子失败。
+    if (res.code) {
+      setStatus(res.error || '批量删除失败，请稍后重试', 'err');
+      return;
+    }
     // 兼容旧 service worker：逐个删
     let ok = 0;
     for (const id of ids) {
@@ -713,7 +996,7 @@ $('detectAndAdd').addEventListener('click', async () => {
 const batchAddBtn = $('batchAdd');
 if (batchAddBtn) {
   batchAddBtn.addEventListener('click', async () => {
-    const text = ($('batchUrls')?.value || '').trim() || $('addUrl').value.trim();
+    const text = ($('batchUrls')?.value || '').trim();
     if (!text) {
       setStatus('请填写批量 URL', 'err');
       return;
@@ -721,13 +1004,7 @@ if (batchAddBtn) {
     await requestOptionsAccessFromGesture(splitPermissionInputs(text), { continueOnDenied: true });
     setStatus('批量识别添加中…');
     batchAddBtn.disabled = true;
-    const res = await send('batchDetectAndSave', {
-      text,
-      note: $('addNote').value.trim() || undefined,
-      tags: $('addTags').value.trim() || undefined,
-      key: $('addKey').value.trim() || undefined,
-      category: $('addCategory')?.value || 'gongyi'
-    });
+    const res = await send('batchDetectAndSave', { text });
     batchAddBtn.disabled = false;
     if (!res.ok) {
       setStatus(res.error || '批量添加失败', 'err');
@@ -744,10 +1021,20 @@ if (batchAddBtn) {
       el.className = 'notice drawer-detection';
       el.dataset.tone = res.okCount ? 'info' : 'danger';
     }
-    if ($('batchUrls')) $('batchUrls').value = '';
-    setStatus(`批量完成：成功 ${res.okCount}/${res.total}`, res.okCount ? 'ok' : 'err');
     state.sites = res.sites || [];
     renderList();
+    const failedInputs = (res.results || [])
+      .filter((item) => !item.ok)
+      .map((item) => item.input)
+      .filter(Boolean);
+    if (failedInputs.length || Number(res.failCount) > 0) {
+      // 保留失败条目和抽屉，用户可以直接修复或重试，不必重新粘贴整批内容。
+      if ($('batchUrls') && failedInputs.length) $('batchUrls').value = failedInputs.join('\n');
+      setStatus(`批量完成：成功 ${res.okCount}/${res.total}，失败条目已保留`, 'err');
+      return;
+    }
+    if ($('batchUrls')) $('batchUrls').value = '';
+    setStatus(`批量完成：成功 ${res.okCount}/${res.total}`, 'ok');
     closeDrawer();
   });
 }
@@ -829,7 +1116,8 @@ $('siteList').addEventListener('click', async (e) => {
     const openUrl = typeof openUrlForSite === 'function'
       ? openUrlForSite(site)
       : (site.domain ? `https://${site.domain}/` : site.baseUrl);
-    await send('openUrl', { url: openUrl, siteId: site.id });
+    const opened = await send('openUrl', { url: openUrl, siteId: site.id });
+    setStatus(opened.ok ? '已打开站点' : (opened.error || '打开站点失败'), opened.ok ? 'ok' : 'err');
   } else if (act === 'copy-client') {
     const text = typeof formatApiBaseV1 === 'function'
       ? formatApiBaseV1(site)
@@ -1101,6 +1389,18 @@ if (listCategorySel) {
   });
 }
 
+$('listTag')?.addEventListener('change', (event) => {
+  state.tagFilter = event.currentTarget.value || 'all';
+  renderList();
+});
+
+$('listSort')?.addEventListener('change', (event) => {
+  state.sortOrder = ['current', 'name', 'updated', 'health'].includes(event.currentTarget.value)
+    ? event.currentTarget.value
+    : 'current';
+  renderList();
+});
+
 const addCategorySel = $('addCategory');
 if (addCategorySel) {
   addCategorySel.addEventListener('change', async () => {
@@ -1120,6 +1420,19 @@ const unlimitedKeyPref = $('preferUnlimitedAutoKey');
 if (unlimitedKeyPref) {
   unlimitedKeyPref.addEventListener('change', async () => {
     const next = unlimitedKeyPref.checked === true;
+    if (next) {
+      const confirmed = await confirmAction({
+        title: '开启无限额度自动创建？',
+        copy: '之后确认创建的新 Key 将使用无限额度且永不过期，风险高于默认设置。',
+        details: '只建议在隔离的测试站和专用账号中开启。',
+        confirmLabel: '开启高风险设置',
+        trigger: unlimitedKeyPref
+      });
+      if (!confirmed) {
+        unlimitedKeyPref.checked = false;
+        return;
+      }
+    }
     const res = await send('savePrefs', { prefs: { preferUnlimitedAutoKey: next } });
     if (!res.ok) {
       unlimitedKeyPref.checked = !next;
@@ -1136,32 +1449,77 @@ if (unlimitedKeyPref) {
 }
 
 $('refreshAll').addEventListener('click', async () => {
+  if (['running', 'stopping'].includes(String(state.balanceRefreshProgress?.status || ''))) return;
   await requestOptionsAccessFromGesture(state.sites, { continueOnDenied: true });
   setStatus('正在刷新全部余额…');
-  $('refreshAll').disabled = true;
+  state.balanceStopPendingRunId = '';
   state.balanceRefreshProgress = { status: 'running', total: state.sites.length, completed: 0, succeeded: 0, failed: 0 };
   renderBalanceProgress();
-  const res = await send('refreshAllBalances');
-  $('refreshAll').disabled = false;
-  if (!res.ok) { setStatus(res.error || '刷新失败', 'err'); return; }
-  state.sites = res.sites || [];
-  if (res.progress) state.balanceRefreshProgress = res.progress;
-  const rows = res.results || [];
-  const ok = rows.filter((row) => row.ok).length;
-  const skipped = rows.filter((row) => row.skipped).length;
-  const failed = rows.length - ok - skipped;
-  setStatus(
-    `完成：成功 ${ok} · 失败 ${failed} · 未授权跳过 ${skipped}`,
-    ok || (!failed && !skipped) ? 'ok' : 'err'
-  );
-  renderList();
+  try {
+    const res = await send('refreshAllBalances');
+    if (res.progress) applyBalanceRefreshProgress(res.progress);
+    if (!res.ok) {
+      setStatus(res.error || '刷新失败', 'err');
+      return;
+    }
+    if (Array.isArray(res.sites)) applySitesSnapshot(res.sites);
+    const progress = state.balanceRefreshProgress || res.progress || {};
+    const rows = Array.isArray(res.results) ? res.results : [];
+    if (res.stopped || progress.status === 'stopped') {
+      const total = Number(progress.total) || state.sites.length;
+      const completed = Math.min(total, Number(progress.completed) || 0);
+      const pending = Array.isArray(progress.pendingSiteIds)
+        ? progress.pendingSiteIds.length
+        : Math.max(0, total - completed);
+      setStatus(`余额刷新已停止 · 完成 ${completed}/${total} · 剩余 ${pending} 个`, '');
+      return;
+    }
+    const ok = rows.filter((row) => row.ok).length;
+    const skipped = rows.filter((row) => row.skipped).length;
+    const failed = rows.length - ok - skipped;
+    setStatus(
+      `完成：成功 ${ok} · 失败 ${failed} · 未授权跳过 ${skipped}`,
+      ok || (!failed && !skipped) ? 'ok' : 'err'
+    );
+  } finally {
+    renderList();
+    renderBalanceProgress();
+  }
+});
+
+$('stopBalanceRefresh')?.addEventListener('click', async () => {
+  const progress = state.balanceRefreshProgress || {};
+  const runId = String(progress.runId || '').trim();
+  if (progress.status !== 'running' || !runId) return;
+  state.balanceStopPendingRunId = runId;
+  state.balanceStopFocusPending = true;
+  state.balanceRefreshProgress = {
+    ...progress,
+    status: 'stopping',
+    stopRequestedAt: Date.now()
+  };
   renderBalanceProgress();
-  if (state.editingId) fillEditor(state.sites.find((s) => s.id === state.editingId));
+  queueMicrotask(() => $('balanceProgress')?.focus());
+  const res = await send('stopBalanceRefresh', { runId });
+  if (res.progress) applyBalanceRefreshProgress(res.progress);
+  if (!res.ok) {
+    if (state.balanceRefreshProgress?.runId === runId
+      && state.balanceRefreshProgress?.status === 'stopping') {
+      state.balanceRefreshProgress = { ...state.balanceRefreshProgress, status: 'running' };
+    }
+    state.balanceStopPendingRunId = '';
+    renderBalanceProgress();
+    setStatus(res.error || '停止失败，请重试', 'err');
+    return;
+  }
+  renderBalanceProgress();
+  if (!res.accepted && res.message) setStatus(res.message, '');
 });
 
 function resetImportPreview(message = '粘贴或选择 JSON 后先生成预览。') {
   state.importPreview = null;
   state.importPreviewText = '';
+  state.importPreviewUpdatedAt = null;
   const preview = $('importPreview');
   preview.textContent = message;
   preview.classList.remove('is-ready');
@@ -1186,7 +1544,10 @@ function renderImportPreview(preview) {
 
 function hasCurrentImportPreview() {
   const text = $('importText').value.trim();
-  return Boolean(text && state.importPreview && state.importPreviewText === text);
+  return Boolean(text
+    && state.importPreview
+    && state.importPreviewText === text
+    && (state.importPreviewUpdatedAt == null || state.importPreviewUpdatedAt === state.siteDataUpdatedAt));
 }
 
 async function previewImportData() {
@@ -1195,6 +1556,12 @@ async function previewImportData() {
   if (!text) {
     resetImportPreview();
     setStatus('请粘贴 JSON 或选择文件', 'err');
+    return false;
+  }
+  const sizeError = importSizeError(text);
+  if (sizeError) {
+    resetImportPreview(sizeError);
+    setStatus(sizeError, 'err');
     return false;
   }
   $('previewImport').disabled = true;
@@ -1208,6 +1575,10 @@ async function previewImportData() {
     }
     state.importPreview = preview;
     state.importPreviewText = text;
+    state.importPreviewUpdatedAt = Number.isFinite(Number(preview.dataUpdatedAt))
+      ? Number(preview.dataUpdatedAt)
+      : 0;
+    state.siteDataUpdatedAt = state.importPreviewUpdatedAt;
     renderImportPreview(preview);
     $('doImport').disabled = false;
     $('doReplace').disabled = false;
@@ -1222,6 +1593,11 @@ $('pickFile').addEventListener('click', () => $('importFile').click());
 $('importFile').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
+  if (Number(file.size) > IMPORT_MAX_BYTES) {
+    setStatus('导入文件超过 2 MB 上限，请拆分后再导入', 'err');
+    e.target.value = '';
+    return;
+  }
   try {
     $('importText').value = await file.text();
     setStatus(`已载入文件 ${file.name}`, 'ok');
@@ -1240,6 +1616,8 @@ async function runImport(mode) {
   if (state.importBusy) return;
   const text = $('importText').value.trim();
   if (!text) { setStatus('请粘贴 JSON 或选择文件', 'err'); return; }
+  const sizeError = importSizeError(text);
+  if (sizeError) { resetImportPreview(sizeError); setStatus(sizeError, 'err'); return; }
   if (!hasCurrentImportPreview()) {
     await previewImportData();
     return;
@@ -1248,14 +1626,24 @@ async function runImport(mode) {
   $('doImport').disabled = true;
   $('doReplace').disabled = true;
   try {
-    const res = await send('import', { text, mode });
-    if (!res.ok) { setStatus(res.error || '导入失败', 'err'); return; }
+    const res = await send('import', {
+      text,
+      mode,
+      previewUpdatedAt: state.importPreviewUpdatedAt
+    });
+    if (!res.ok) {
+      if (res.code === 'import_preview_stale') resetImportPreview('站点数据已变化，请重新生成预览。');
+      setStatus(res.error || '导入失败', 'err');
+      return;
+    }
     const backupText = res.backup ? '；已保留替换前快照，可立即撤销' : '';
     const skippedText = res.skipped ? `，跳过 ${res.skipped} 条` : '';
     setStatus(`导入成功（${res.format || 'unknown'}）：${res.imported} 条${skippedText}，当前共 ${res.sites.length} 站${backupText}`, 'ok');
     state.sites = res.sites || [];
     renderList();
     if (res.backup) updateRestoreImportButton(res.backup);
+    // 成功后立即清空完整 JSON，避免凭据长期留在 textarea 和浏览器编辑历史里。
+    $('importText').value = '';
     resetImportPreview('导入完成。修改内容后可生成下一次预览。');
     await refreshLatestImportBackup();
   } catch (error) {
@@ -1375,9 +1763,13 @@ function formatDiagnostics(d) {
     `上次迁移：${d.migratedAt ? new Date(d.migratedAt).toLocaleString() : '—'}`,
     `站点数：${d.siteCount ?? 0}`,
     accessLine,
+    d.orphanedPermissionCheckFailed
+      ? '孤立授权：当前环境无法检查'
+      : `孤立授权：${d.orphanedPermissionCount ?? 0}`,
     `完整 Key：${d.completeKeyCount ?? 0} · 掩码/残缺 Key：${d.maskedKeyCount ?? 0}`,
     `余额失败站点：${d.failedBalanceCount ?? 0}`,
     `余额错误码：${errorCodes.length ? errorCodes.join(' · ') : '无'}`,
+    `本机维护：${d.maintenanceStatus || 'ok'}`,
     `默认分类：${d.defaultCategory || 'gongyi'}`,
     `自动创建无限 Key：${d.preferUnlimitedAutoKey ? '是' : '否（默认 $10 / 90 天）'}`,
     `余额批刷：${batch.status || 'idle'} · 完成 ${Number(batch.completed) || 0}/${Number(batch.total) || 0} · 成功 ${Number(batch.succeeded) || 0} · 失败 ${Number(batch.failed) || 0} · 跳过 ${Number(batch.skipped) || 0} · 待处理 ${Number(batch.pending) || 0}`
@@ -1423,6 +1815,8 @@ function buildRedactedDiagnostics(d, userAgent = '') {
     `数据 schema：v${number(d?.schemaVersion)}`,
     `站点数：${number(d?.siteCount)}`,
     `站点授权：已授权 ${number(d?.authorizedSiteCount)} · 未授权 ${number(d?.unauthorizedSiteCount)} · 未知 ${number(d?.unknownPermissionSiteCount)}`,
+    `孤立授权：${d?.orphanedPermissionCheckFailed ? '无法检查' : number(d?.orphanedPermissionCount)}`,
+    `本机维护：${safeToken(d?.maintenanceStatus, 'ok')}`,
     `余额失败：${number(d?.failedBalanceCount)}`,
     `余额批刷：${batchStatus} · 完成 ${number(batch.completed)}/${number(batch.total)} · 成功 ${number(batch.succeeded)} · 失败 ${number(batch.failed)} · 跳过 ${number(batch.skipped)} · 待处理 ${number(batch.pending)}`,
     `稳定错误码：${errorCodes.length ? errorCodes.join(' · ') : '无'}`
@@ -1444,6 +1838,31 @@ async function refreshDiagnostics() {
   if ($('diagnosticSiteCount')) $('diagnosticSiteCount').textContent = String(diagnostics.siteCount ?? 0);
   if ($('diagnosticKeyCount')) $('diagnosticKeyCount').textContent = String(diagnostics.completeKeyCount ?? 0);
   if ($('diagnosticFailureCount')) $('diagnosticFailureCount').textContent = String(diagnostics.failedBalanceCount ?? 0);
+  if ($('diagnosticOrphanedCount')) {
+    $('diagnosticOrphanedCount').textContent = diagnostics.orphanedPermissionCheckFailed
+      ? '—'
+      : String(diagnostics.orphanedPermissionCount ?? 0);
+  }
+  const unauthorizedIssue = $('unauthorizedPermissionIssue');
+  const orphanedIssue = $('orphanedPermissionIssue');
+  const failedIssue = $('failedBalanceIssue');
+  const maintenanceIssue = $('maintenanceIssue');
+  if (unauthorizedIssue) unauthorizedIssue.hidden = Number(diagnostics.unauthorizedSiteCount) <= 0;
+  if (orphanedIssue) orphanedIssue.hidden = Number(diagnostics.orphanedPermissionCount) <= 0;
+  if (failedIssue) failedIssue.hidden = Number(diagnostics.failedBalanceCount) <= 0;
+  if (maintenanceIssue) maintenanceIssue.hidden = !diagnostics.maintenanceStatus
+    || diagnostics.maintenanceStatus === 'ok';
+  const allClear = $('diagnosticsAllClear');
+  if (allClear) {
+    const hasUnknown = Number(diagnostics.unknownPermissionSiteCount) > 0
+      || diagnostics.permissionCheckUnsupported === true
+      || diagnostics.orphanedPermissionCheckFailed === true
+      || (diagnostics.maintenanceStatus && diagnostics.maintenanceStatus !== 'ok');
+    allClear.hidden = hasUnknown
+      || Number(diagnostics.unauthorizedSiteCount) > 0
+      || Number(diagnostics.orphanedPermissionCount) > 0
+      || Number(diagnostics.failedBalanceCount) > 0;
+  }
   return diagnostics;
 }
 
@@ -1451,6 +1870,8 @@ const refreshDiagBtn = $('refreshDiagnostics');
 if (refreshDiagBtn) {
   refreshDiagBtn.addEventListener('click', () => { void refreshDiagnostics(); });
 }
+
+$('refreshMaintenance')?.addEventListener('click', () => { void refreshDiagnostics(); });
 
 const copyDiagBtn = $('copyDiagnostics');
 if (copyDiagBtn) {
@@ -1476,11 +1897,46 @@ if (grantUnauthorizedBtn) {
     grantUnauthorizedBtn.disabled = true;
     setStatus('正在申请未授权站点的 HTTPS 权限…');
     try {
-      const granted = await requestOptionsAccessFromGesture(state.sites);
+      const unauthorizedIds = Array.isArray(state.latestDiagnostics?.unauthorizedSiteIds)
+        ? new Set(state.latestDiagnostics.unauthorizedSiteIds.map(String))
+        : null;
+      const targets = unauthorizedIds?.size
+        ? state.sites.filter((site) => unauthorizedIds.has(String(site.id)))
+        : state.sites;
+      const granted = await requestOptionsAccessFromGesture(targets);
       await refreshDiagnostics();
       if (granted) setStatus('站点权限状态已更新', 'ok');
     } finally {
       grantUnauthorizedBtn.disabled = false;
+    }
+  });
+}
+
+const cleanupOrphanedBtn = $('cleanupOrphanedAccess');
+if (cleanupOrphanedBtn) {
+  cleanupOrphanedBtn.addEventListener('click', async () => {
+    const count = Number(state.latestDiagnostics?.orphanedPermissionCount) || 0;
+    if (!count) return;
+    const confirmed = await confirmAction({
+      title: '清理孤立授权？',
+      copy: '这会移除不再收藏站点的 HTTPS 访问权限，不会删除站点或 Key。',
+      details: `将清理 ${count} 项授权；真实域名不会显示或复制。`,
+      confirmLabel: '清理授权',
+      trigger: cleanupOrphanedBtn
+    });
+    if (!confirmed) return;
+    cleanupOrphanedBtn.disabled = true;
+    setStatus('正在清理孤立授权…');
+    try {
+      const res = await send('removeOrphanedSiteAccess');
+      if (!res.ok) {
+        setStatus(res.error || '清理授权失败', 'err');
+        return;
+      }
+      await refreshDiagnostics();
+      setStatus(res.count ? `已清理 ${res.count} 项孤立授权` : '没有可清理的孤立授权', 'ok');
+    } finally {
+      cleanupOrphanedBtn.disabled = false;
     }
   });
 }

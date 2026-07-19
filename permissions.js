@@ -34,6 +34,12 @@
     return normalized ? `https://${normalized}/*` : '';
   }
 
+  function isExactHttpsPermissionOrigin(value) {
+    const origin = String(value || '').trim();
+    const match = origin.match(/^https:\/\/([^\s/]+)\/\*$/i);
+    return Boolean(match && !match[1].includes('*'));
+  }
+
   function chromePermissionCall(method, details) {
     return new Promise((resolve) => {
       try {
@@ -48,6 +54,27 @@
             return;
           }
           resolve({ ok: true, value: value === true });
+        });
+      } catch (error) {
+        resolve({ ok: false, error: String(error?.message || error) });
+      }
+    });
+  }
+
+  function chromePermissionGetAll() {
+    return new Promise((resolve) => {
+      try {
+        if (typeof chrome === 'undefined' || !chrome.permissions?.getAll) {
+          resolve({ ok: false, error: 'chrome.permissions unavailable' });
+          return;
+        }
+        chrome.permissions.getAll((value) => {
+          const error = chrome.runtime?.lastError;
+          if (error) {
+            resolve({ ok: false, error: error.message || String(error) });
+            return;
+          }
+          resolve({ ok: true, value: value || {} });
         });
       } catch (error) {
         resolve({ ok: false, error: String(error?.message || error) });
@@ -130,6 +157,40 @@
     return ensureSiteAccess(site, options);
   }
 
+  /**
+   * 只处理扩展自己申请的 HTTPS Origin。调用方应在明确的用户动作后使用，
+   * 避免删除用户可能仍在使用的站点访问权限。
+   */
+  async function removeSiteAccess(domains) {
+    const origins = permissionOriginsForSites(domains)
+      .filter(isExactHttpsPermissionOrigin);
+    if (!origins.length || typeof chrome === 'undefined' || !chrome.permissions?.remove) {
+      return { ok: true, origins, removed: false, unsupported: true };
+    }
+    const removed = await chromePermissionCall('remove', { origins });
+    if (!removed.ok || !removed.value) {
+      return {
+        ok: false,
+        origins,
+        code: 'site_permission_remove_failed',
+        error: removed.error || '无法撤销站点访问权限'
+      };
+    }
+    return { ok: true, origins, removed: true };
+  }
+
+  async function listOrphanedSiteAccess(sites) {
+    const currentOrigins = new Set(permissionOriginsForSites(Array.isArray(sites) ? sites : []));
+    const granted = await chromePermissionGetAll();
+    if (!granted.ok) {
+      return { ok: false, code: 'site_permission_list_failed', error: granted.error || '无法读取站点访问权限' };
+    }
+    const origins = (Array.isArray(granted.value?.origins) ? granted.value.origins : [])
+      .filter(isExactHttpsPermissionOrigin)
+      .filter((origin) => !currentOrigins.has(origin));
+    return { ok: true, origins, count: origins.length };
+  }
+
   /** 只读统计：尚未授予 HTTPS 可选权限的收藏站（不弹授权框） */
   async function countUnauthorizedSites(sites) {
     const list = Array.isArray(sites) ? sites : [];
@@ -190,11 +251,14 @@
   root.permissionOriginForDomain = permissionOriginForDomain;
   root.permissionOriginForSite = permissionOriginForSite;
   root.chromePermissionCall = chromePermissionCall;
+  root.chromePermissionGetAll = chromePermissionGetAll;
   root.permissionOriginsForSites = permissionOriginsForSites;
   root.permissionRequestErrorMessage = permissionRequestErrorMessage;
   root.requestSiteAccessFromGesture = requestSiteAccessFromGesture;
   root.ensureSiteAccess = ensureSiteAccess;
   root.ensureAccessForSite = ensureAccessForSite;
+  root.removeSiteAccess = removeSiteAccess;
+  root.listOrphanedSiteAccess = listOrphanedSiteAccess;
   root.countUnauthorizedSites = countUnauthorizedSites;
 
   if (typeof module !== 'undefined' && module.exports) {
@@ -203,11 +267,14 @@
       permissionOriginForDomain,
       permissionOriginForSite,
       chromePermissionCall,
+      chromePermissionGetAll,
       permissionOriginsForSites,
       permissionRequestErrorMessage,
       requestSiteAccessFromGesture,
       ensureSiteAccess,
       ensureAccessForSite,
+      removeSiteAccess,
+      listOrphanedSiteAccess,
       countUnauthorizedSites
     };
   }

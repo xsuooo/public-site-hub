@@ -15,9 +15,9 @@ function read(relativePath) {
 }
 
 test('release versions expose SemVer RC identity and Chrome numeric ordering', () => {
-  assert.equal(pkg.version, '1.0.0-rc.1');
-  assert.equal(manifest.version_name, '1.0.0-rc.1');
-  assert.equal(manifest.version, '0.99.0.1');
+  assert.equal(pkg.version, '1.0.0-rc.2');
+  assert.equal(manifest.version_name, '1.0.0-rc.2');
+  assert.equal(manifest.version, '0.99.0.2');
 });
 
 test('Chrome manifest versions strictly increase from every RC to final', () => {
@@ -39,6 +39,7 @@ test('release metadata preserves identity, least host access and executable gate
   assert.equal(manifest.name, '公益站收藏');
   assert.deepEqual(manifest.permissions, [
     'storage',
+    'alarms',
     'tabs',
     'cookies',
     'activeTab',
@@ -54,13 +55,17 @@ test('release metadata preserves identity, least host access and executable gate
   assert.equal(pkg.scripts.build, 'node scripts/build-extension.js');
   assert.equal(pkg.scripts['verify:package'], 'node scripts/verify-package.js');
   assert.equal(pkg.scripts['verify:runtime'], 'node scripts/smoke-extension.js');
+  assert.equal(pkg.scripts['verify:ui'],
+    'npm run build && playwright test --config=playwright.config.js --workers=1');
+  assert.match(pkg.devDependencies['@playwright/test'], /^\^1\./);
   assert.equal(pkg.scripts['release:artifact'], 'node scripts/package-release.js');
 });
 
 test('README documents permissions, local-only data and zero-telemetry RC boundaries', () => {
   for (const pattern of [
-    /1\.0\.0-rc\.1/,
+    /1\.0\.0-rc\.2/,
     /`storage`：[^\n]*chrome\.storage\.local/,
+    /`alarms`：[^\n]*恢复快照/,
     /`tabs`：[^\n]*(?:读取|创建)[^\n]*标签页/,
     /`cookies`：[^\n]*登录会话/,
     /`activeTab`：[^\n]*用户点击/,
@@ -81,7 +86,8 @@ test('README uses reproducible commands and only relative dist paths', () => {
     'npm run test:coverage',
     'npm run build',
     'npm run verify:package',
-    'npm run verify:runtime'
+    'npm run verify:runtime',
+    'npm run verify:ui'
   ]) {
     assert.match(readme, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
@@ -109,14 +115,14 @@ test('generated packages, profiles, inputs and external attestations stay out of
 
 test('RC documentation fixes immutable artifacts, two-person matrix and release gates', () => {
   const overview = read('docs/rc/README.md');
-  const matrix = read('docs/rc/rc-1-test-matrix.md');
-  const acceptance = read('docs/rc/rc-1-acceptance.md');
+  const matrix = read('docs/rc/rc-2-test-matrix.md');
+  const acceptance = read('docs/rc/rc-2-acceptance.md');
   const policy = read('docs/rc/immutable-release-policy.md');
   const cleanup = read('docs/rc/credential-cleanup.md');
 
   for (const pattern of [
-    /v1\.0\.0-rc\.1/,
-    /public-site-hub-1\.0\.0-rc\.1\.zip/,
+    /v1\.0\.0-rc\.2/,
+    /public-site-hub-1\.0\.0-rc\.2\.zip/,
     /SHA-256/,
     /Chrome Stable/,
     /Edge Stable/,
@@ -135,6 +141,7 @@ test('RC documentation fixes immutable artifacts, two-person matrix and release 
   assert.match(overview, /注释标签/);
   assert.match(overview, /标签后的记录提交/);
   assert.match(overview, /Edge\/Chromium[\s\S]*Chrome Stable 和 Edge Stable[\s\S]*手工/);
+  assert.match(overview, /verify:runtime[\s\S]*verify:ui[\s\S]*Playwright/);
   assert.doesNotMatch(changelog, /自动冒烟通过/);
   assert.match(changelog, /自动冒烟必须通过/);
   assert.match(changelog, /两名测试者必须[\s\S]*并完成五天交叉浏览器验收/);

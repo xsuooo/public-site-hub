@@ -244,7 +244,9 @@ function resolveErrorAction(res, site, preferredRetry = 'refreshBalance') {
         const openUrl = typeof openUrlForSite === 'function'
           ? openUrlForSite(target)
           : (target.domain ? `https://${target.domain}/` : target.baseUrl);
-        await send('openUrl', { url: openUrl, siteId: target.id });
+        const opened = await send('openUrl', { url: openUrl, siteId: target.id });
+        if (!opened.ok) toast(opened.error || '打开站点失败', 'err');
+        else toast('已打开站点', 'ok');
       }
     };
   }
@@ -562,7 +564,7 @@ function renderFilters() {
         const active = item.tag === 'all'
           ? activeTag === 'all'
           : activeTag.toLowerCase() === item.tag.toLowerCase();
-        return `<button type="button" class="menu-item tag-option" role="menuitemradio" data-tag="${escapeAttr(item.tag)}" aria-pressed="${String(active)}"><span>${escapeHtml(item.label)}</span>${active ? '<span aria-hidden="true">✓</span>' : ''}</button>`;
+        return `<button type="button" class="menu-item tag-option" role="menuitemradio" data-tag="${escapeAttr(item.tag)}" aria-checked="${String(active)}"><span>${escapeHtml(item.label)}</span>${active ? '<span aria-hidden="true">✓</span>' : ''}</button>`;
       }).join('');
       const label = state.tagFilter === 'all' ? '标签' : `#${state.tagFilter}`;
       if ($('tagFilterLabel')) $('tagFilterLabel').textContent = label;
@@ -833,11 +835,64 @@ async function load() {
   render();
 }
 
+function captureKeyDraft() {
+  const input = document.querySelector('.site-card [data-key-input]');
+  const card = input?.closest('.site-card');
+  if (!input?.value || !card?.dataset.id) return null;
+  return {
+    siteId: card.dataset.id,
+    value: input.value,
+    focused: document.activeElement === input,
+    selectionStart: input.selectionStart,
+    selectionEnd: input.selectionEnd
+  };
+}
+
+function restoreKeyDraft(draft) {
+  if (!draft) return;
+  const card = Array.from(document.querySelectorAll('.site-card'))
+    .find((item) => item.dataset.id === draft.siteId);
+  const input = card?.querySelector('[data-key-input]');
+  if (!input) return;
+  input.value = draft.value;
+  if (!draft.focused) return;
+  queueMicrotask(() => {
+    input.focus();
+    try { input.setSelectionRange(draft.selectionStart, draft.selectionEnd); } catch {}
+  });
+}
+
+function applySitesSnapshot(nextSites) {
+  const draft = captureKeyDraft();
+  state.sites = Array.isArray(nextSites) ? nextSites : [];
+  if (state.expandedId && !state.sites.some((site) => site.id === state.expandedId)) {
+    state.expandedId = null;
+  }
+  render();
+  restoreKeyDraft(draft);
+}
+
 if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !changes.balanceRefreshProgress) return;
-    if (applyBalanceRefreshProgress(changes.balanceRefreshProgress.newValue || null)) {
-      renderBalanceProgress();
+    if (areaName !== 'local') return;
+    if (changes.sites) {
+      applySitesSnapshot(changes.sites.newValue || []);
+    }
+    if (changes.prefs?.newValue) {
+      const prefs = changes.prefs.newValue;
+      state.saveCategory = prefs.defaultCategory === 'relay' ? 'relay' : 'gongyi';
+      if ($('saveCategory')) $('saveCategory').value = state.saveCategory;
+      const label = state.saveCategory === 'relay' ? '中转站' : '公益站';
+      $('saveCategoryTrigger')?.setAttribute('aria-label', `收藏分类：${label}`);
+      $('saveCategoryTrigger')?.setAttribute('title', `当前分类：${label}`);
+      document.querySelectorAll('[data-save-category]').forEach((item) => {
+        item.setAttribute('aria-checked', String(item.dataset.saveCategory === state.saveCategory));
+      });
+    }
+    if (changes.balanceRefreshProgress) {
+      if (applyBalanceRefreshProgress(changes.balanceRefreshProgress.newValue || null)) {
+        renderBalanceProgress();
+      }
     }
   });
 }
@@ -911,7 +966,7 @@ $('tagFilter')?.addEventListener('click', (e) => {
   if (tag === 'all') state.tagFilter = 'all';
   else if (String(state.tagFilter || '').toLowerCase() === tag.toLowerCase()) state.tagFilter = 'all';
   else state.tagFilter = tag;
-  closePopover($('tagFilterTrigger'), $('tagFilter'));
+  closePopover($('tagFilterTrigger'), $('tagFilter'), true);
   render();
 });
 
@@ -961,6 +1016,20 @@ $('saveCategoryMenu')?.addEventListener('keydown', (event) => {
 $('tagFilterTrigger')?.addEventListener('click', (e) => {
   e.stopPropagation();
   togglePopover(e.currentTarget, $('tagFilter'), true);
+});
+
+$('tagFilter')?.addEventListener('keydown', (event) => {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const items = Array.from(event.currentTarget.querySelectorAll('[role="menuitemradio"]'));
+  if (!items.length) return;
+  event.preventDefault();
+  const current = Math.max(0, items.indexOf(document.activeElement));
+  const next = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? items.length - 1
+      : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+  items[next].focus();
 });
 
 $('quickToolsTrigger')?.addEventListener('click', (e) => {
@@ -1185,7 +1254,8 @@ $('list').addEventListener('click', async (e) => {
     const openUrl = typeof openUrlForSite === 'function'
       ? openUrlForSite(site)
       : (site.domain ? `https://${site.domain}/` : site.baseUrl);
-    await send('openUrl', { url: openUrl, siteId: site.id });
+    const opened = await send('openUrl', { url: openUrl, siteId: site.id });
+    toast(opened.ok ? '已打开站点' : (opened.error || '打开站点失败'), opened.ok ? 'ok' : 'err');
     return;
   }
   if (act === 'open-token') {

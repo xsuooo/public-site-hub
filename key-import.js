@@ -228,12 +228,28 @@ async function persistScrapedKeys(siteId, expectedOrigin, keys) {
   return { ...status, site };
 }
 
-async function persistBalanceResult(site, result) {
+async function persistBalanceResult(site, result, options = {}) {
   const expectedOrigin = siteOriginFor(site);
+  const expectedAttemptId = String(options?.attemptId || '').trim();
   let persistedSite = null;
+  let rejected = false;
   const apply = async (sites) => {
     const target = sites.find((item) => item.id === site?.id);
-    if (!target || !sameSiteOrigin(target, expectedOrigin)) return sites;
+    if (!target || !sameSiteOrigin(target, expectedOrigin)) {
+      rejected = true;
+      return sites;
+    }
+    if (expectedAttemptId && typeof root.isBalanceRefreshAttemptCurrent === 'function') {
+      const isCurrent = await root.isBalanceRefreshAttemptCurrent(
+        site.id,
+        expectedOrigin,
+        expectedAttemptId
+      );
+      if (!isCurrent) {
+        rejected = true;
+        return sites;
+      }
+    }
 
     // 只回填刷新流程实际产生的字段；用户在刷新期间修改的备注、分类等保持不动。
     if ((!target.type || target.type === 'auto') && site.type && site.type !== 'auto') {
@@ -254,6 +270,7 @@ async function persistBalanceResult(site, result) {
   const saved = typeof mutateSites === 'function'
     ? await mutateSites(apply)
     : await apply(await loadSites()).then(saveSites);
+  if (rejected) return null;
   return saved.find((item) => item.id === site?.id) || persistedSite || site;
 }
 
@@ -264,6 +281,9 @@ const keyProvisionService = typeof createKeyProvisionService === 'function'
     loadSites,
     saveSites,
     mutateSites: typeof mutateSites === 'function' ? mutateSites : undefined,
+    tryAcquireSiteOperation: typeof root.tryAcquireSiteOperation === 'function'
+      ? root.tryAcquireSiteOperation
+      : undefined,
     readSession: (domain, site) => readPageAuthSession(domain, siteOriginFor(site || { domain })),
     verify: (tabId, session, site) => (typeof verifyNewApiTabAccount === 'function'
       ? verifyNewApiTabAccount(tabId, session, siteOriginFor(site))

@@ -15,7 +15,9 @@ const {
   buildExportConfig,
   buildCheckinExportConfig,
   adaptImportConfig,
-  parseImportText
+  parseImportText,
+  MAX_IMPORT_BYTES,
+  MAX_IMPORT_SITES
 } = require('../import-export.js');
 
 test('native export and both native import paths preserve check-in synchronization state', () => {
@@ -166,6 +168,22 @@ test('check-in format round-trip preserves relay category through adapt and pars
 
 test('unsupported JSON is rejected instead of becoming an empty import', () => {
   assert.throws(() => parseImportText(JSON.stringify({ unrelated: true })), /不支持的导入格式/);
+});
+
+test('import parsing rejects oversized payloads and excessive source entries', () => {
+  const oversized = JSON.stringify({
+    app: 'public-site-hub',
+    sites: [{ domain: 'large.example.com', note: 'x'.repeat(MAX_IMPORT_BYTES) }]
+  });
+  assert.throws(() => parseImportText(oversized), /超过 2 MB 上限/);
+
+  const tooMany = Array.from({ length: MAX_IMPORT_SITES + 1 }, (_, index) => ({
+    domain: `site-${index}.example.invalid`
+  }));
+  assert.throws(
+    () => parseImportText(JSON.stringify({ app: 'public-site-hub', sites: tooMany })),
+    /最多导入 1000 个站点/
+  );
 });
 
 test('import parsing reports invalid entries separately from valid duplicate sites', () => {

@@ -119,6 +119,8 @@ test('popup menus expose accessible state and Escape focus restoration', () => {
   assert.match(css, /\.save-category-menu \.menu-item\[aria-checked="true"\]::after\s*\{[^}]*content:\s*"✓"/s);
   const renderFiltersSource = extractFunction(js, 'renderFilters');
   assert.match(renderFiltersSource, /setAttribute\('aria-checked',\s*String\(item\.dataset\.saveCategory === state\.saveCategory\)\)/);
+  assert.match(renderFiltersSource, /role="menuitemradio"[\s\S]*aria-checked="\$\{String\(active\)\}"/);
+  assert.doesNotMatch(renderFiltersSource, /role="menuitemradio"[^>]*aria-pressed=/);
   assert.match(renderFiltersSource, /saveCategoryTrigger[\s\S]*setAttribute\('aria-label'/);
   assert.match(renderFiltersSource, /saveCategoryTrigger[\s\S]*(?:\.title\s*=|setAttribute\('title')/);
   const openPopoverSource = extractFunction(js, 'openPopover');
@@ -136,6 +138,15 @@ test('popup menus expose accessible state and Escape focus restoration', () => {
   assert.match(categoryMenuKeydownSource, /\.focus\(\)/);
   assert.match(html, /aria-controls="saveCategoryMenu"/);
   assert.match(html, /aria-controls="tagFilter"/);
+  const tagMenuKeydownStart = js.indexOf("$('tagFilter')?.addEventListener('keydown'");
+  assert.notEqual(tagMenuKeydownStart, -1, 'tag menu should handle keyboard navigation');
+  const tagMenuKeydownSource = js.slice(tagMenuKeydownStart, js.indexOf("$('quickToolsTrigger')", tagMenuKeydownStart));
+  for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End']) {
+    assert.match(tagMenuKeydownSource, new RegExp(`["']${key}["']`));
+  }
+  assert.match(tagMenuKeydownSource, /preventDefault\(\)/);
+  assert.match(tagMenuKeydownSource, /\.focus\(\)/);
+  assert.match(css, /\.tag-option\[aria-checked="true"\]/);
   assert.match(html, /aria-controls="quickTools"/);
   assert.match(js, /function positionPopover/);
   assert.match(js, /event\.key !== 'Escape'/);
@@ -183,6 +194,7 @@ test('popup reports messaging and clipboard failures through the shared runtime'
   assert.match(js, /function runMutation[\s\S]*state\.mutationBusy/);
   assert.doesNotMatch(js, /function originForSite\s*\(/);
   assert.match(js, /escapeHtml\(originForSite\(site\)\)/);
+  assert.match(js, /const opened = await send\('openUrl'[\s\S]*?toast\(opened\.ok \?/);
 });
 
 test('popup continues bulk refresh after permission denial but blocks single-site work', async () => {
@@ -236,4 +248,17 @@ test('manage click events cannot become edit ids and edit links use the new rout
   context.openOptions('site id');
   assert.equal(calls[0].url,
     'chrome-extension://test/options.html#view=sites&edit=site%20id');
+});
+
+test('popup follows cross-window site and preference changes while preserving an entered Key draft', () => {
+  const listenerStart = js.indexOf("if (chrome.storage?.onChanged)");
+  const listenerEnd = js.indexOf('async function copyText', listenerStart);
+  assert.ok(listenerStart >= 0 && listenerEnd > listenerStart);
+  const listener = js.slice(listenerStart, listenerEnd);
+  assert.match(listener, /changes\.sites/);
+  assert.match(listener, /changes\.prefs/);
+  assert.match(listener, /changes\.balanceRefreshProgress/);
+  assert.match(js, /function captureKeyDraft\(\)/);
+  assert.match(js, /function restoreKeyDraft\(draft\)/);
+  assert.match(js, /captureKeyDraft\(\)[\s\S]*render\(\)[\s\S]*restoreKeyDraft\(draft\)/);
 });

@@ -5,10 +5,11 @@
     formatApiBaseV1, siteIdentity, originForSite, loadPrefs, savePrefs, openUrlForSite, tokenPageUrlForSite,
    scrapeTabBalanceAndKeys, verifyNewApiTabAccount, createTabApiKey, createKeyProvisionService, isSuspiciousBalance,
    normalizeKey, ensureDefaultKeys, cleanTokenName, isCompleteApiKey, createSiteBackup,
-   getLatestSiteBackup, listSiteBackups, deleteSiteBackup, clearSiteBackups, restoreSiteBackup,
+   getLatestSiteBackup, loadSiteBackups, listSiteBackups, deleteSiteBackup, clearSiteBackups, restoreSiteBackup,
    loadBalanceRefreshProgress, saveBalanceRefreshProgress,
    mutateSites, migrateSiteData, classifyBalanceError, loadSiteDataMeta,
     ensureSiteAccess, ensureAccessForSite, countUnauthorizedSites, requestSiteAccessFromGesture,
+    listOrphanedSiteAccess, removeSiteAccess,
    normalizedSiteDomain, permissionOriginForDomain, originFromDomain,
    waitTabComplete, personalUrls, isBalanceFriendlyPath, findTabForDomain,
    openTemporaryBalanceTab, ensureSiteTab, closeTabSafe, openFailedBalanceSites,
@@ -32,6 +33,8 @@ importScripts(
 );
 
 const CONTEXT_MENU_ID = 'public-site-hub-add';
+const MAINTENANCE_ALARM_ID = 'public-site-hub-maintenance';
+const MAINTENANCE_PERIOD_MINUTES = 24 * 60;
 const DIAGNOSTIC_BALANCE_ERROR_CODES = new Set([
   'permission_denied',
   'timeout',
@@ -47,11 +50,31 @@ const DIAGNOSTIC_BALANCE_ERROR_CODES = new Set([
 ]);
 let importQueue = Promise.resolve();
 let contextMenuSetupInFlight = false;
+let startupMaintenanceError = '';
 
 function enqueueImport(task) {
   const operation = importQueue.then(task);
   importQueue = operation.catch(() => undefined);
   return operation;
+}
+
+function importPreviewVersion(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : null;
+}
+
+async function checkImportPreviewVersion(expectedUpdatedAt) {
+  const expected = importPreviewVersion(expectedUpdatedAt);
+  if (expected == null || typeof loadSiteDataMeta !== 'function') return null;
+  const meta = await loadSiteDataMeta();
+  const actual = Number(meta?.updatedAt) || 0;
+  if (actual === expected) return null;
+  return {
+    ok: false,
+    code: 'import_preview_stale',
+    error: '站点数据在预览后已变化，请重新生成导入预览'
+  };
 }
 
 function ensureContextMenu() {
@@ -85,19 +108,52 @@ function ensureContextMenu() {
   }
 }
 
+function ensureMaintenanceAlarm() {
+  if (!chrome.alarms?.create) return;
+  try {
+    chrome.alarms.create(MAINTENANCE_ALARM_ID, {
+      delayInMinutes: MAINTENANCE_PERIOD_MINUTES,
+      periodInMinutes: MAINTENANCE_PERIOD_MINUTES
+    });
+  } catch (error) {
+    console.warn('[公益站收藏] maintenance_alarm_failed');
+  }
+}
+
+async function runStartupMaintenance() {
+  if (typeof migrateSiteData === 'function') await migrateSiteData();
+  if (typeof loadSiteBackups === 'function') await loadSiteBackups();
+  startupMaintenanceError = '';
+}
+
+const startupReady = runStartupMaintenance().catch(() => {
+  startupMaintenanceError = 'startup_maintenance_failed';
+  console.warn('[公益站收藏] startup_maintenance_failed');
+});
+
 chrome.runtime.onInstalled.addListener(() => {
   ensureContextMenu();
+  ensureMaintenanceAlarm();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   ensureContextMenu();
+  ensureMaintenanceAlarm();
 });
 
 // SW 冷启动时也注册一次
 ensureContextMenu();
-if (typeof migrateSiteData === 'function') {
-  void migrateSiteData().catch((error) => {
-    console.warn('[公益站收藏] 本地数据迁移失败', error);
+ensureMaintenanceAlarm();
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm?.name !== MAINTENANCE_ALARM_ID || typeof loadSiteBackups !== 'function') return;
+    void loadSiteBackups()
+      .then(() => { startupMaintenanceError = ''; })
+      .catch(() => {
+        startupMaintenanceError = 'maintenance_cleanup_failed';
+        console.warn('[公益站收藏] backup_cleanup_failed');
+      });
   });
 }
 
@@ -334,11 +390,13 @@ async function detectAndSave(input, extra = {}) {
   let site = sites.find((item) => sameSiteDomain(item, preview));
 
   let keyImport = null;
-  try {
-    keyImport = await tryAutoImportKeys(site);
-    if (keyImport?.site) site = keyImport.site;
-  } catch (e) {
-    keyImport = { added: 0, error: String(e?.message || e) };
+  if (extra.autoImportKeys !== false) {
+    try {
+      keyImport = await tryAutoImportKeys(site);
+      if (keyImport?.site) site = keyImport.site;
+    } catch (e) {
+      keyImport = { added: 0, error: String(e?.message || e) };
+    }
   }
 
   const checkin = await maybeAutoSyncSite(site);
@@ -365,20 +423,41 @@ function parseBatchLines(text) {
     .filter((line, i, arr) => arr.indexOf(line) === i);
 }
 
+function hasBatchCredential(options = {}) {
+  const source = options && typeof options === 'object' ? options : {};
+  const hasValue = (value) => value != null && String(value).trim() !== '';
+  if (['key', 'apiKey', 'token'].some((field) => hasValue(source[field]))) return true;
+  if (!Array.isArray(source.keys)) return false;
+  return source.keys.some((entry) => {
+    if (typeof entry === 'string') return hasValue(entry);
+    return hasValue(entry?.key) || hasValue(entry?.token) || hasValue(entry?.value);
+  });
+}
+
+function batchCredentialError() {
+  return {
+    ok: false,
+    code: 'batch_key_not_allowed',
+    error: '批量添加不接受 API Key，请添加完成后逐站设置'
+  };
+}
+
 async function batchDetectAndSave(text, options = {}) {
+  const batchOptions = options && typeof options === 'object' ? options : {};
+  if (hasBatchCredential(batchOptions)) return batchCredentialError();
   const lines = parseBatchLines(text);
   if (!lines.length) return { ok: false, error: '请粘贴至少一个 URL 或域名' };
 
-  const category = await resolveSaveCategory(options.category);
+  const category = await resolveSaveCategory(batchOptions.category);
   const results = [];
   let okCount = 0;
   for (const line of lines) {
     try {
       const res = await detectAndSave(line, {
-        note: options.note || '',
-        key: options.key || undefined,
-        tags: options.tags || [],
-        category
+        note: batchOptions.note || '',
+        tags: batchOptions.tags || [],
+        category,
+        autoImportKeys: false
       });
       if (res.ok) okCount += 1;
       results.push({
@@ -451,7 +530,7 @@ if (chrome.contextMenus?.onClicked) {
       || tab?.url
       || '';
     if (!raw || (!/^https:\/\//i.test(raw) && !raw.includes('.'))) {
-      console.warn('[公益站收藏] 右键添加：无效地址', raw);
+      console.warn('[公益站收藏] context_menu_invalid_url');
       return;
     }
     const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/\s+/g, '')}`;
@@ -461,9 +540,10 @@ if (chrome.contextMenus?.onClicked) {
     // contextMenus.onClicked 是用户手势入口；必须在任何 await 前发起可选权限请求。
     const accessRequest = requestSiteAccessFromGesture(url);
     (async () => {
+      await startupReady;
       const access = await accessRequest;
       if (!access.ok) {
-        console.warn('[公益站收藏] 右键添加：未获得站点访问权限', access.error);
+        console.warn('[公益站收藏] context_menu_permission_denied');
         return;
       }
       const res = await detectAndSave(url, {
@@ -475,15 +555,16 @@ if (chrome.contextMenus?.onClicked) {
       if (res.ok) {
         console.log('[公益站收藏] 已添加', res.site?.domain, res.detection?.summary);
       } else {
-        console.warn('[公益站收藏] 添加失败', res.error);
+        console.warn('[公益站收藏] context_menu_add_failed', res.code || 'unknown');
       }
-    })().catch((e) => console.warn('[公益站收藏] 右键添加异常', e));
+    })().catch(() => console.warn('[公益站收藏] context_menu_add_failed', 'unexpected'));
   });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
   (async () => {
+    await startupReady;
     switch (type) {
       case 'listSites':
         return { ok: true, sites: await loadSites() };
@@ -515,10 +596,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           category: message.category
         });
       case 'batchDetectAndSave':
+        if (hasBatchCredential(message)) return batchCredentialError();
         return batchDetectAndSave(message.text || message.input, {
           note: message.note,
           tags: message.tags,
-          key: message.key,
           category: message.category
         });
       case 'redetectSite':
@@ -564,12 +645,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         };
       }
       case 'removeSite':
-        return { ok: true, sites: await removeSiteById(message.id) };
+        try {
+          return { ok: true, sites: await removeSiteById(message.id) };
+        } catch (error) {
+          if (error?.code === 'site_operation_busy') {
+            return { ok: false, code: error.code, error: error.message };
+          }
+          throw error;
+        }
       case 'removeSites': {
         const ids = Array.isArray(message.ids) ? message.ids : [];
         const before = await loadSites();
-        const sites = await removeSitesByIds(ids);
-        return { ok: true, sites, removed: Math.max(0, before.length - sites.length) };
+        try {
+          const sites = await removeSitesByIds(ids);
+          return { ok: true, sites, removed: Math.max(0, before.length - sites.length) };
+        } catch (error) {
+          if (error?.code === 'site_operation_busy') {
+            return { ok: false, code: error.code, error: error.message };
+          }
+          throw error;
+        }
       }
       case 'addKey':
         return { ok: true, sites: await addKeyToSite(message.siteId, message.key) };
@@ -625,6 +720,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           code: 'foreground_permission_required',
           error: '站点权限必须在 Popup 或设置页的用户点击中申请'
         };
+      case 'getOrphanedSiteAccess': {
+        const sites = await loadSites();
+        return typeof listOrphanedSiteAccess === 'function'
+          ? listOrphanedSiteAccess(sites)
+          : { ok: false, code: 'site_permission_list_failed', error: '权限清理功能不可用' };
+      }
+      case 'removeOrphanedSiteAccess': {
+        const sites = await loadSites();
+        if (typeof listOrphanedSiteAccess !== 'function' || typeof removeSiteAccess !== 'function') {
+          return { ok: false, code: 'site_permission_remove_failed', error: '权限清理功能不可用' };
+        }
+        const orphaned = await listOrphanedSiteAccess(sites);
+        if (!orphaned.ok || !orphaned.origins?.length) {
+          return orphaned.ok
+            ? { ok: true, removed: false, count: 0, origins: [] }
+            : orphaned;
+        }
+        const removed = await removeSiteAccess(orphaned.origins);
+        return { ...removed, count: removed.ok ? orphaned.origins.length : 0 };
+      }
       case 'getDiagnostics': {
         const sites = await loadSites();
         const prefs = await loadPrefs();
@@ -633,6 +748,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ? await loadSiteDataMeta()
           : { schemaVersion: 0 };
         const accessStats = await countUnauthorizedSites(sites);
+        const orphanedAccess = typeof listOrphanedSiteAccess === 'function'
+          ? await listOrphanedSiteAccess(sites)
+          : { ok: false, count: 0 };
         let completeKeys = 0;
         let maskedKeys = 0;
         let failedBalance = 0;
@@ -674,8 +792,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             failedBalanceCount: failedBalance,
             authorizedSiteCount: accessStats.authorizedCount,
             unauthorizedSiteCount: accessStats.unauthorizedCount,
+            unauthorizedSiteIds: Array.isArray(accessStats.unauthorizedSites)
+              ? accessStats.unauthorizedSites.map((item) => String(item?.id || '')).filter(Boolean).slice(0, 1000)
+              : [],
             unknownPermissionSiteCount: accessStats.unknownCount || 0,
             permissionCheckUnsupported: accessStats.unsupported === true,
+            orphanedPermissionCount: orphanedAccess.ok ? Number(orphanedAccess.count) || 0 : 0,
+            orphanedPermissionCheckFailed: orphanedAccess.ok !== true,
+            maintenanceStatus: startupMaintenanceError || 'ok',
             preferUnlimitedAutoKey: prefs.preferUnlimitedAutoKey === true,
             defaultCategory: prefs.defaultCategory || 'gongyi',
             balanceRefresh: {
@@ -695,6 +819,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       case 'import': {
         return enqueueImport(async () => {
+          const previewState = await checkImportPreviewVersion(message.previewUpdatedAt);
+          if (previewState) return previewState;
           const parsed = typeof message.text === 'string'
             ? parseImportText(message.text)
             : parseImportText(JSON.stringify(message.config || {}));
@@ -720,7 +846,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             }
             const replaced = await replaceSitesWithBackup(
               parsed.sites,
-              'before-replace-import'
+              'before-replace-import',
+              { expectedUpdatedAt: importPreviewVersion(message.previewUpdatedAt) }
             );
             return {
               ok: true,
@@ -734,7 +861,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               backup: replaced.backup
             };
           }
-          const sites = await importSites(parsed.sites, { mode });
+          const sites = await importSites(parsed.sites, {
+            mode,
+            expectedUpdatedAt: importPreviewVersion(message.previewUpdatedAt)
+          });
           return {
             ok: true,
             sites,
@@ -761,6 +891,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           };
         }
         const current = await loadSites();
+        const meta = typeof loadSiteDataMeta === 'function'
+          ? await loadSiteDataMeta()
+          : {};
         const currentIdentities = new Set(current.map((site) => siteIdentity(site)).filter(Boolean));
         const incomingIdentities = new Set(parsed.sites.map((site) => siteIdentity(site)).filter(Boolean));
         const updating = [...incomingIdentities].filter((identity) => currentIdentities.has(identity)).length;
@@ -775,7 +908,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           incoming: incomingIdentities.size,
           current: current.length,
           added: incomingIdentities.size - updating,
-          updating
+          updating,
+          dataUpdatedAt: Number(meta?.updatedAt) || 0
         };
       }
       case 'getLatestSiteBackup':
@@ -799,10 +933,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       case 'openUrl': {
         let url = String(message.url || '').trim();
         // 可传 siteId，强制用稳定首页
-        if (message.siteId && typeof openUrlForSite === 'function') {
+        if (message.siteId) {
           const all = await loadSites();
           const s = all.find((x) => x.id === message.siteId);
-          if (s) url = openUrlForSite(s) || url;
+          if (!s) return { ok: false, code: 'site_not_found', error: '站点不存在' };
+          url = typeof openUrlForSite === 'function'
+            ? (openUrlForSite(s) || url)
+            : (s.baseUrl || s.pageUrl || `https://${s.domain}/`);
         }
         if (!url) return { ok: false, error: '无效链接' };
         try {
@@ -893,7 +1030,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           temporary = ensured.temporary;
         }
         if (!tabId) return { ok: false, error: '请先打开该站页面（令牌管理页最佳）' };
-        const activeSession = await readPageAuthSession(site.domain, siteOrigin(site));
+        // 固定在刚选中的标签页读取会话；否则同 Origin 多标签/多会话时可能串用另一页。
+        const activeSession = await readPageAuthSession(site.domain, siteOrigin(site), tabId);
         const scanTabId = activeSession.tabId || tabId;
         const scanOptions = { readFullTokenKeys: false, expectedOrigin: siteOrigin(site) };
         if (site.type === 'newapi') {
@@ -920,7 +1058,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         const persisted = await persistScrapedKeys(
           site.id,
-          site.domain,
+          siteOrigin(site),
           scraped.trustedKeys || []
         );
         if (persisted.reason === 'site_not_found') return { ok: false, error: '站点不存在' };
@@ -950,6 +1088,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   })()
     .then(sendResponse)
-    .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+    .catch((e) => sendResponse({
+      ok: false,
+      ...(e?.code ? { code: String(e.code).slice(0, 80) } : {}),
+      error: String(e?.message || e)
+    }));
   return true;
 });

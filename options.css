@@ -36,9 +36,9 @@ body {
 }
 
 .balance-progress {
-  min-width: 300px;
+  min-width: 360px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 82px auto;
+  grid-template-columns: minmax(0, 1fr) 72px auto auto;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -55,9 +55,14 @@ body {
 }
 
 .balance-progress progress {
-  width: 82px;
+  width: 72px;
   height: 5px;
   accent-color: var(--info);
+}
+
+.balance-progress .progress-stop {
+  min-height: 26px;
+  padding-inline: 8px;
 }
 
 .options-layout {
@@ -306,7 +311,7 @@ body {
 .site-table-head,
 .site-item {
   display: grid;
-  grid-template-columns: 38px minmax(190px, 1.6fr) minmax(150px, .9fr) minmax(105px, .65fr) 90px 84px;
+  grid-template-columns: 38px minmax(170px, 1.5fr) minmax(135px, .9fr) minmax(95px, .65fr) 82px 100px 84px;
   align-items: center;
   gap: 10px;
 }
@@ -428,6 +433,10 @@ body {
 .table-key {
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.table-health {
+  min-width: 0;
 }
 
 .row-actions {
@@ -574,7 +583,7 @@ body {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -604,6 +613,19 @@ body {
 
 .issue-list {
   display: grid;
+}
+
+.diagnostics-all-clear {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 2px 0;
+  color: var(--success);
+}
+
+.diagnostics-all-clear .issue-icon {
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .issue-row {
@@ -894,6 +916,7 @@ body {
       "select site site"
       ". meta meta"
       ". balance key"
+      ". health health"
       "actions actions actions";
     align-items: start;
     row-gap: 8px;
@@ -908,13 +931,15 @@ body {
   .table-meta { grid-area: meta; }
   .table-balance { grid-area: balance; }
   .table-key { grid-area: key; text-align: right; }
+  .table-health { grid-area: health; }
   .desktop-row-actions { display: none; }
   .mobile-card-actions {
     grid-area: actions;
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
   }
-  .mobile-card-actions .btn { flex: 1; }
+  .mobile-card-actions .btn { flex: 1 1 110px; }
 
   .two-column-workspace {
     grid-template-columns: 1fr;
@@ -935,6 +960,11 @@ body {
   .balance-progress {
     min-width: 0;
     max-width: 260px;
+    grid-template-columns: 72px auto auto;
+  }
+
+  .balance-progress > span {
+    display: none;
   }
 
   .options-layout {
@@ -985,10 +1015,24 @@ body {
 @media (max-width: 640px) {
   .options-topbar {
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .options-topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .options-topbar-actions .balance-progress {
-    display: none;
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) 64px auto auto;
+  }
+
+  .options-topbar-actions .balance-progress > span {
+    display: block;
   }
 
   .options-topbar-actions .btn span {
@@ -1030,11 +1074,16 @@ body {
       ". meta"
       ". balance"
       ". key"
+      ". health"
       "actions actions";
     row-gap: 10px;
   }
 
   .table-key {
+    text-align: left;
+  }
+
+  .table-health {
     text-align: left;
   }
 

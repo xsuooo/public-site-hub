@@ -1,6 +1,6 @@
 {
   "name": "public-site-hub",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "private": true,
   "description": "Lightweight hub for public API sites: auto-detect, keys, search, balance",
   "scripts": {
@@ -9,7 +9,11 @@
     "build": "node scripts/build-extension.js",
     "verify:package": "node scripts/verify-package.js",
     "verify:runtime": "node scripts/smoke-extension.js",
+    "verify:ui": "npm run build && playwright test --config=playwright.config.js --workers=1",
     "rc:fixture": "node scripts/rc-fixture-server.js",
     "release:artifact": "node scripts/package-release.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }

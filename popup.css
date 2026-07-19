@@ -184,7 +184,7 @@ body {
   justify-content: space-between;
 }
 
-.tag-option[aria-pressed="true"] {
+.tag-option[aria-checked="true"] {
   background: var(--primary-soft);
   color: var(--primary);
 }

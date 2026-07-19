@@ -88,6 +88,35 @@ test('empty import is rejected before it can replace stored sites', async () => 
   );
 });
 
+test('import preview version is checked inside the site mutation queue', async () => {
+  memory.sites = [utils.normalizeSite({ id: 'preview-site', domain: 'preview.example.com', note: 'before' })];
+  memory.siteDataMeta = { schemaVersion: storage.SITE_DATA_SCHEMA_VERSION, updatedAt: 10 };
+  memory.siteBackups = [];
+
+  const edit = storage.updateSiteById('preview-site', { note: 'newer edit' });
+  const staleMerge = storage.importSites(
+    [{ domain: 'imported.example.com' }],
+    { mode: 'merge', expectedUpdatedAt: 10 }
+  );
+  await edit;
+  await assert.rejects(staleMerge, (error) => error?.code === 'import_preview_stale');
+  assert.deepEqual(memory.sites.map((site) => site.domain), ['preview.example.com']);
+  assert.equal(memory.sites[0].note, 'newer edit');
+
+  memory.siteDataMeta.updatedAt = 20;
+  const staleVersion = 20;
+  const secondEdit = storage.updateSiteById('preview-site', { note: 'latest edit' });
+  const staleReplace = storage.replaceSitesWithBackup(
+    [{ domain: 'replacement.example.com' }],
+    'before-replace-import',
+    { expectedUpdatedAt: staleVersion }
+  );
+  await secondEdit;
+  await assert.rejects(staleReplace, (error) => error?.code === 'import_preview_stale');
+  assert.equal(memory.sites[0].note, 'latest edit');
+  assert.deepEqual(memory.siteBackups, []);
+});
+
 test('balance refresh progress clamps invalid counters and preserves the current site', () => {
   assert.deepEqual(
     storage.normalizeBalanceRefreshProgress({
@@ -260,4 +289,130 @@ test('normalizePrefs defaults preferUnlimitedAutoKey to false', () => {
   assert.equal(storage.normalizePrefs({}).preferUnlimitedAutoKey, false);
   assert.equal(storage.normalizePrefs({ preferUnlimitedAutoKey: true }).preferUnlimitedAutoKey, true);
   assert.equal(storage.normalizePrefs({ preferUnlimitedAutoKey: 'yes' }).preferUnlimitedAutoKey, false);
+});
+
+test('balance refresh attempts use a per-site compare-and-swap identity', async () => {
+  memory.sites = [utils.normalizeSite({
+    id: 'attempt-site',
+    domain: 'attempt.example.com',
+    baseUrl: 'https://attempt.example.com',
+    type: 'newapi'
+  })];
+  memory.balanceRefreshAttempts = [];
+
+  const first = await storage.beginBalanceRefreshAttempt(
+    'attempt-site',
+    'https://attempt.example.com',
+    'attempt-1'
+  );
+  assert.equal(first.ok, true);
+  assert.equal(
+    await storage.isBalanceRefreshAttemptCurrent(
+      'attempt-site',
+      'https://attempt.example.com',
+      'attempt-1'
+    ),
+    true
+  );
+
+  const second = await storage.beginBalanceRefreshAttempt(
+    'attempt-site',
+    'https://attempt.example.com',
+    'attempt-2'
+  );
+  assert.equal(second.ok, true);
+  assert.equal(
+    await storage.isBalanceRefreshAttemptCurrent(
+      'attempt-site',
+      'https://attempt.example.com',
+      'attempt-1'
+    ),
+    false
+  );
+  assert.equal(
+    await storage.isBalanceRefreshAttemptCurrent(
+      'attempt-site',
+      'https://attempt.example.com',
+      'attempt-2'
+    ),
+    true
+  );
+
+  // 旧任务完成时不能清掉新任务的 claim。
+  assert.equal(await storage.finishBalanceRefreshAttempt('attempt-site', 'attempt-1'), false);
+  assert.equal(
+    await storage.isBalanceRefreshAttemptCurrent(
+      'attempt-site',
+      'https://attempt.example.com',
+      'attempt-2'
+    ),
+    true
+  );
+  assert.equal(await storage.finishBalanceRefreshAttempt('attempt-site', 'attempt-2'), true);
+  assert.equal(
+    await storage.isBalanceRefreshAttemptCurrent(
+      'attempt-site',
+      'https://attempt.example.com',
+      'attempt-2'
+    ),
+    false
+  );
+});
+
+test('removing a site invalidates its active balance attempt before the ID can be reused', async () => {
+  memory.sites = [utils.normalizeSite({
+    id: 'removed-attempt-site',
+    domain: 'removed-attempt.example.com',
+    type: 'newapi'
+  })];
+  memory.balanceRefreshAttempts = [];
+  await storage.beginBalanceRefreshAttempt(
+    'removed-attempt-site',
+    'https://removed-attempt.example.com',
+    'attempt-before-remove'
+  );
+
+  await storage.removeSiteById('removed-attempt-site');
+  await storage.upsertSite({
+    id: 'removed-attempt-site',
+    domain: 'removed-attempt.example.com',
+    type: 'newapi'
+  });
+
+  assert.equal(
+    await storage.isBalanceRefreshAttemptCurrent(
+      'removed-attempt-site',
+      'https://removed-attempt.example.com',
+      'attempt-before-remove'
+    ),
+    false
+  );
+});
+
+test('import replacement and backup restore clear every obsolete balance attempt', async () => {
+  memory.sites = [utils.normalizeSite({ id: 'current-site', domain: 'current.example.com' })];
+  memory.siteBackups = [];
+  memory.balanceRefreshAttempts = [{
+    siteId: 'reused-site',
+    attemptId: 'attempt-before-import',
+    expectedOrigin: 'https://old.example.com',
+    startedAt: Date.now()
+  }];
+
+  await storage.replaceSitesWithBackup([
+    { id: 'replacement-site', domain: 'replacement.example.com' }
+  ]);
+  assert.deepEqual(memory.balanceRefreshAttempts, []);
+
+  const backup = await storage.createSiteBackup([
+    { id: 'restored-site', domain: 'restored.example.com' }
+  ], 'manual-restore-test');
+  memory.balanceRefreshAttempts = [{
+    siteId: 'restored-site',
+    attemptId: 'attempt-before-restore',
+    expectedOrigin: 'https://restored.example.com',
+    startedAt: Date.now()
+  }];
+  await storage.restoreSiteBackup(backup.id);
+  assert.deepEqual(memory.balanceRefreshAttempts, []);
 });

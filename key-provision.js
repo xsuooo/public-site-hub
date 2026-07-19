@@ -55,6 +55,7 @@
     const create = deps.create;
     const merge = deps.merge;
     const makeName = deps.makeName || createAutoKeyName;
+    const tryAcquireSiteOperation = deps.tryAcquireSiteOperation;
     const inFlight = new Map();
 
     async function persistCandidates(siteId, candidates, expectedOrigin) {
@@ -208,7 +209,7 @@
           ok: false,
           code: 'create_confirmation_required',
           needsCreateConfirm: true,
-          error: '未发现可用 Key；确认后将创建一把永不过期、无限额度的 Key',
+          error: '未发现可用 Key；确认后将按当前自动创建设置创建一把新 Key，并仅保存到本机',
           site
         };
       }
@@ -288,7 +289,18 @@
       const flightKey = `${key}:${options.allowCreate === true ? 'create' : 'scan'}`;
       const pending = inFlight.get(flightKey);
       if (pending) return pending;
-      const operation = provision(key, options);
+      let lease = null;
+      if (typeof tryAcquireSiteOperation === 'function') {
+        lease = tryAcquireSiteOperation(key, 'ensure_site_key');
+        if (!lease?.ok) {
+          return Promise.resolve({
+            ok: false,
+            code: lease?.code || 'site_operation_busy',
+            error: lease?.error || '站点正在执行其他操作，请稍后重试'
+          });
+        }
+      }
+      const operation = provision(key, options).finally(() => lease?.release?.());
       inFlight.set(flightKey, operation);
       operation.finally(() => {
         if (inFlight.get(flightKey) === operation) inFlight.delete(flightKey);

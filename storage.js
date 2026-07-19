@@ -4,6 +4,7 @@
   const CHECKIN_SYNC_META_KEY = 'checkinSyncMeta';
   const SITE_BACKUPS_KEY = 'siteBackups';
   const BALANCE_REFRESH_PROGRESS_KEY = 'balanceRefreshProgress';
+  const BALANCE_REFRESH_ATTEMPTS_KEY = 'balanceRefreshAttempts';
   const SITE_DATA_META_KEY = 'siteDataMeta';
   const SITE_DATA_SCHEMA_VERSION = 5;
   const MAX_SITE_BACKUPS = 3;
@@ -38,6 +39,62 @@
   let prefsMutationQueue = Promise.resolve();
   let backupMutationQueue = Promise.resolve();
   let balanceProgressMutationQueue = Promise.resolve();
+  const siteOperationLocks = new Map();
+
+  function tryAcquireSiteOperation(siteId, operation = 'site_operation') {
+    const normalizedSiteId = String(siteId || '').trim();
+    if (!normalizedSiteId) {
+      return { ok: false, code: 'site_not_found', error: '站点不存在' };
+    }
+    const active = siteOperationLocks.get(normalizedSiteId);
+    if (active) {
+      return {
+        ok: false,
+        code: 'site_operation_busy',
+        siteId: normalizedSiteId,
+        operation: active.operation,
+        error: '站点正在执行其他操作，请稍后重试'
+      };
+    }
+
+    const token = Symbol(normalizedSiteId);
+    const normalizedOperation = String(operation || 'site_operation').trim() || 'site_operation';
+    siteOperationLocks.set(normalizedSiteId, { token, operation: normalizedOperation });
+    let released = false;
+    return {
+      ok: true,
+      siteId: normalizedSiteId,
+      operation: normalizedOperation,
+      release() {
+        if (released) return;
+        released = true;
+        if (siteOperationLocks.get(normalizedSiteId)?.token === token) {
+          siteOperationLocks.delete(normalizedSiteId);
+        }
+      }
+    };
+  }
+
+  function acquireSiteOperationLeases(siteIds, operation) {
+    const leases = [];
+    for (const siteId of [...new Set(siteIds)].sort()) {
+      const lease = tryAcquireSiteOperation(siteId, operation);
+      if (!lease.ok) {
+        for (const acquired of leases.reverse()) acquired.release();
+        const error = new Error('站点正在执行其他操作，请稍后再删除');
+        error.code = lease.code || 'site_operation_busy';
+        error.siteId = lease.siteId || siteId;
+        error.operation = lease.operation || 'site_operation';
+        throw error;
+      }
+      leases.push(lease);
+    }
+    return {
+      release() {
+        for (const lease of leases.reverse()) lease.release();
+      }
+    };
+  }
 
   function chromeStorageGet(keys) {
     return new Promise((resolve, reject) => {
@@ -163,6 +220,106 @@
     return { kind, siteIds };
   }
 
+  function normalizeBalanceRefreshAttempts(raw) {
+    const list = Array.isArray(raw) ? raw : [];
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const latestBySite = new Map();
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue;
+      const siteId = String(item.siteId || '').trim().slice(0, 120);
+      const attemptId = String(item.attemptId || '').trim().slice(0, 120);
+      const expectedOrigin = String(item.expectedOrigin || '').trim().toLowerCase().slice(0, 500);
+      const startedAt = Number(item.startedAt) || 0;
+      if (!siteId || !attemptId || !/^https:\/\/[^/]+$/i.test(expectedOrigin) || startedAt < cutoff) {
+        continue;
+      }
+      const previous = latestBySite.get(siteId);
+      if (!previous || startedAt >= previous.startedAt) {
+        latestBySite.set(siteId, { siteId, attemptId, expectedOrigin, startedAt });
+      }
+    }
+    return Array.from(latestBySite.values()).slice(0, 1000);
+  }
+
+  async function loadBalanceRefreshAttempts() {
+    const data = await chromeStorageGet([BALANCE_REFRESH_ATTEMPTS_KEY]);
+    return normalizeBalanceRefreshAttempts(data[BALANCE_REFRESH_ATTEMPTS_KEY]);
+  }
+
+  async function clearBalanceRefreshAttemptsUnlocked(siteIds = null) {
+    const current = await loadBalanceRefreshAttempts();
+    const idSet = Array.isArray(siteIds)
+      ? new Set(siteIds.map((id) => String(id || '').trim()).filter(Boolean))
+      : null;
+    const next = idSet
+      ? current.filter((item) => !idSet.has(item.siteId))
+      : [];
+    if (next.length !== current.length) {
+      await chromeStorageSet({ [BALANCE_REFRESH_ATTEMPTS_KEY]: next });
+    }
+    return next;
+  }
+
+  async function beginBalanceRefreshAttempt(siteId, expectedOrigin, attemptId) {
+    const normalizedSiteId = String(siteId || '').trim();
+    const normalizedAttemptId = String(attemptId || '').trim();
+    const normalizedOrigin = String(expectedOrigin || '').trim().toLowerCase();
+    if (!normalizedSiteId || !normalizedAttemptId || !normalizedOrigin) {
+      return { ok: false, code: 'balance_attempt_invalid', error: '余额刷新任务无效' };
+    }
+    return enqueueSiteMutation(async () => {
+      const sites = await loadSites();
+      const site = sites.find((item) => String(item?.id) === normalizedSiteId);
+      if (!site) return { ok: false, code: 'site_not_found', error: '站点不存在' };
+      const actualOrigin = String(root.siteIdentity?.(site) || '').toLowerCase();
+      if (!actualOrigin || actualOrigin !== normalizedOrigin) {
+        return {
+          ok: false,
+          code: 'site_domain_changed',
+          error: '站点地址已修改，已取消过期的余额刷新'
+        };
+      }
+      const attempt = {
+        siteId: normalizedSiteId.slice(0, 120),
+        attemptId: normalizedAttemptId.slice(0, 120),
+        expectedOrigin: normalizedOrigin.slice(0, 500),
+        startedAt: Date.now()
+      };
+      const current = await loadBalanceRefreshAttempts();
+      const next = [attempt, ...current.filter((item) => item.siteId !== normalizedSiteId)];
+      await chromeStorageSet({
+        [BALANCE_REFRESH_ATTEMPTS_KEY]: normalizeBalanceRefreshAttempts(next)
+      });
+      return { ok: true, attempt, site };
+    });
+  }
+
+  async function isBalanceRefreshAttemptCurrent(siteId, expectedOrigin, attemptId) {
+    const normalizedSiteId = String(siteId || '').trim();
+    const normalizedAttemptId = String(attemptId || '').trim();
+    const normalizedOrigin = String(expectedOrigin || '').trim().toLowerCase();
+    if (!normalizedSiteId || !normalizedAttemptId || !normalizedOrigin) return false;
+    const attempts = await loadBalanceRefreshAttempts();
+    return attempts.some((item) => item.siteId === normalizedSiteId
+      && item.attemptId === normalizedAttemptId
+      && item.expectedOrigin === normalizedOrigin);
+  }
+
+  async function finishBalanceRefreshAttempt(siteId, attemptId) {
+    const normalizedSiteId = String(siteId || '').trim();
+    const normalizedAttemptId = String(attemptId || '').trim();
+    if (!normalizedSiteId || !normalizedAttemptId) return false;
+    return enqueueSiteMutation(async () => {
+      const current = await loadBalanceRefreshAttempts();
+      const target = current.find((item) => item.siteId === normalizedSiteId);
+      if (!target || target.attemptId !== normalizedAttemptId) return false;
+      await chromeStorageSet({
+        [BALANCE_REFRESH_ATTEMPTS_KEY]: current.filter((item) => item !== target)
+      });
+      return true;
+    });
+  }
+
   async function loadSiteDataMeta() {
     const data = await chromeStorageGet([SITE_DATA_META_KEY]);
     return normalizeSiteDataMeta(data[SITE_DATA_META_KEY] || {});
@@ -259,6 +416,18 @@
       const next = await mutator(current);
       return saveSites(next);
     });
+  }
+
+  async function assertExpectedSiteDataVersion(expectedUpdatedAt) {
+    if (expectedUpdatedAt == null || expectedUpdatedAt === '') return;
+    const expected = Number(expectedUpdatedAt);
+    if (!Number.isFinite(expected) || expected < 0) return;
+    const current = await loadSiteDataMeta();
+    const actual = Number(current.updatedAt) || 0;
+    if (actual === Math.trunc(expected)) return;
+    const error = new Error('站点数据在预览后已变化，请重新生成导入预览');
+    error.code = 'import_preview_stale';
+    throw error;
   }
 
   async function migrateSiteData() {
@@ -427,11 +596,14 @@
     const backup = backups.find((item) => item.id === id) || null;
     if (!backup) throw new Error('找不到可恢复的导入快照');
     let safetyBackup = null;
-    const sites = await mutateSites(async (current) => {
+    return enqueueSiteMutation(async () => {
+      const current = await loadSites();
       safetyBackup = await createSiteBackup(current, 'before-restore');
-      return backup.sites;
+      const sites = await saveSites(backup.sites);
+      // 恢复会替换整个集合；旧集合和快照中可能复用的 ID 都不能继续接受旧结果。
+      await clearBalanceRefreshAttemptsUnlocked();
+      return { sites, restored: siteBackupInfo(backup), safetyBackup };
     });
-    return { sites, restored: siteBackupInfo(backup), safetyBackup };
   }
 
   async function upsertSite(partial) {
@@ -512,13 +684,36 @@
   }
 
   async function removeSiteById(id) {
-    return mutateSites((sites) => sites.filter((s) => s.id !== id));
+    const targetId = String(id || '').trim();
+    if (!targetId) return loadSites();
+    const lease = acquireSiteOperationLeases([targetId], 'remove_site');
+    try {
+      return await enqueueSiteMutation(async () => {
+        const sites = await loadSites();
+        const saved = await saveSites(sites.filter((site) => String(site.id) !== targetId));
+        await clearBalanceRefreshAttemptsUnlocked([targetId]);
+        return saved;
+      });
+    } finally {
+      lease.release();
+    }
   }
 
   async function removeSitesByIds(ids) {
     const idSet = new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean));
     if (!idSet.size) return loadSites();
-    return mutateSites((sites) => sites.filter((s) => !idSet.has(String(s.id))));
+    const targetIds = Array.from(idSet);
+    const lease = acquireSiteOperationLeases(targetIds, 'remove_sites');
+    try {
+      return await enqueueSiteMutation(async () => {
+        const sites = await loadSites();
+        const saved = await saveSites(sites.filter((site) => !idSet.has(String(site.id))));
+        await clearBalanceRefreshAttemptsUnlocked(targetIds);
+        return saved;
+      });
+    } finally {
+      lease.release();
+    }
   }
 
   async function addKeyToSite(siteId, keyEntry) {
@@ -572,22 +767,44 @@
     });
   }
 
-  async function importSites(incomingSites, { mode = 'merge' } = {}) {
-    if (!Array.isArray(incomingSites) || !incomingSites.length) {
-      throw new Error('导入内容中没有可用站点，已取消以保护现有数据');
-    }
-    return mutateSites((existing) => root.mergeSites?.(
-      mode === 'replace' ? [] : existing,
-      incomingSites,
-      { preferIncoming: mode === 'replace' || mode === 'merge' }
-    ) || []);
-  }
-
-  async function replaceSitesWithBackup(incomingSites, reason = 'before-replace-import') {
+  async function importSites(incomingSites, { mode = 'merge', expectedUpdatedAt = null } = {}) {
     if (!Array.isArray(incomingSites) || !incomingSites.length) {
       throw new Error('导入内容中没有可用站点，已取消以保护现有数据');
     }
     return enqueueSiteMutation(async () => {
+      await assertExpectedSiteDataVersion(expectedUpdatedAt);
+      const existing = await loadSites();
+      const next = root.mergeSites?.(
+        mode === 'replace' ? [] : existing,
+        incomingSites,
+        { preferIncoming: mode === 'replace' || mode === 'merge' }
+      ) || [];
+      const sites = await saveSites(next);
+      const nextById = new Map(sites.map((site) => [String(site.id), site]));
+      const invalidatedIds = existing
+        .filter((site) => {
+          const replacement = nextById.get(String(site.id));
+          return !replacement || root.siteIdentity?.(replacement) !== root.siteIdentity?.(site);
+        })
+        .map((site) => site.id);
+      const importedIds = incomingSites
+        .map((site) => String(site?.id || '').trim())
+        .filter(Boolean);
+      await clearBalanceRefreshAttemptsUnlocked([...invalidatedIds, ...importedIds]);
+      return sites;
+    });
+  }
+
+  async function replaceSitesWithBackup(
+    incomingSites,
+    reason = 'before-replace-import',
+    { expectedUpdatedAt = null } = {}
+  ) {
+    if (!Array.isArray(incomingSites) || !incomingSites.length) {
+      throw new Error('导入内容中没有可用站点，已取消以保护现有数据');
+    }
+    return enqueueSiteMutation(async () => {
+      await assertExpectedSiteDataVersion(expectedUpdatedAt);
       const current = await loadSites();
       const backup = await createSiteBackup(current, reason);
       const next = root.mergeSites?.(
@@ -596,6 +813,7 @@
         { preferIncoming: true }
       ) || [];
       const sites = await saveSites(next);
+      await clearBalanceRefreshAttemptsUnlocked();
       return { sites, backup };
     });
   }
@@ -605,6 +823,7 @@
   root.CHECKIN_SYNC_META_KEY = CHECKIN_SYNC_META_KEY;
   root.SITE_BACKUPS_KEY = SITE_BACKUPS_KEY;
   root.BALANCE_REFRESH_PROGRESS_KEY = BALANCE_REFRESH_PROGRESS_KEY;
+  root.BALANCE_REFRESH_ATTEMPTS_KEY = BALANCE_REFRESH_ATTEMPTS_KEY;
   root.SITE_DATA_META_KEY = SITE_DATA_META_KEY;
   root.SITE_DATA_SCHEMA_VERSION = SITE_DATA_SCHEMA_VERSION;
   root.SITE_DATA_MIGRATIONS = SITE_DATA_MIGRATIONS;
@@ -616,6 +835,11 @@
   root.normalizeBalanceRefreshScope = normalizeBalanceRefreshScope;
   root.loadBalanceRefreshProgress = loadBalanceRefreshProgress;
   root.saveBalanceRefreshProgress = saveBalanceRefreshProgress;
+  root.normalizeBalanceRefreshAttempts = normalizeBalanceRefreshAttempts;
+  root.loadBalanceRefreshAttempts = loadBalanceRefreshAttempts;
+  root.beginBalanceRefreshAttempt = beginBalanceRefreshAttempt;
+  root.isBalanceRefreshAttemptCurrent = isBalanceRefreshAttemptCurrent;
+  root.finishBalanceRefreshAttempt = finishBalanceRefreshAttempt;
   root.loadCheckinSyncMeta = loadCheckinSyncMeta;
   root.saveCheckinSyncMeta = saveCheckinSyncMeta;
   root.loadSites = loadSites;
@@ -631,6 +855,7 @@
   root.deleteSiteBackup = deleteSiteBackup;
   root.clearSiteBackups = clearSiteBackups;
   root.restoreSiteBackup = restoreSiteBackup;
+  root.tryAcquireSiteOperation = tryAcquireSiteOperation;
   root.upsertSite = upsertSite;
   root.updateSiteById = updateSiteById;
   root.removeSiteById = removeSiteById;
@@ -648,6 +873,7 @@
       CHECKIN_SYNC_META_KEY,
       SITE_BACKUPS_KEY,
       BALANCE_REFRESH_PROGRESS_KEY,
+      BALANCE_REFRESH_ATTEMPTS_KEY,
       SITE_DATA_META_KEY,
       SITE_DATA_SCHEMA_VERSION,
       SITE_DATA_MIGRATIONS,
@@ -659,6 +885,11 @@
       normalizeBalanceRefreshScope,
       loadBalanceRefreshProgress,
       saveBalanceRefreshProgress,
+      normalizeBalanceRefreshAttempts,
+      loadBalanceRefreshAttempts,
+      beginBalanceRefreshAttempt,
+      isBalanceRefreshAttemptCurrent,
+      finishBalanceRefreshAttempt,
       loadCheckinSyncMeta,
       saveCheckinSyncMeta,
       loadSites,
@@ -674,6 +905,7 @@
       deleteSiteBackup,
       clearSiteBackups,
       restoreSiteBackup,
+      tryAcquireSiteOperation,
       upsertSite,
       updateSiteById,
       removeSiteById,

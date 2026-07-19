@@ -18,12 +18,13 @@
         </div>
       </div>
       <div class="options-topbar-actions">
-        <div class="balance-progress" id="balanceProgress" hidden role="status" aria-live="polite">
-          <span id="balanceProgressText">准备刷新余额</span>
-          <progress id="balanceProgressBar" max="1" value="0"></progress>
+        <div class="balance-progress" id="balanceProgress" hidden role="region" aria-label="余额刷新进度" aria-describedby="balanceProgressText balanceProgressCount" tabindex="-1">
+          <span id="balanceProgressText" role="status" aria-live="polite" aria-atomic="true">准备刷新余额</span>
+          <progress id="balanceProgressBar" max="1" value="0" aria-label="余额刷新进度" aria-busy="false"></progress>
           <strong id="balanceProgressCount"></strong>
+          <button type="button" class="btn btn-sm progress-stop" id="stopBalanceRefresh" title="当前站点处理完成后停止" aria-label="停止余额刷新" hidden>停止</button>
         </div>
-        <button type="button" class="btn" id="refreshAll">
+        <button type="button" class="btn" id="refreshAll" aria-label="刷新全部余额" title="刷新全部余额">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
           <span>刷新全部余额</span>
         </button>
@@ -77,7 +78,7 @@
               </div>
             </header>
             <div class="panel-body site-manager-body">
-              <div class="toolbar-row">
+              <div class="toolbar-row" aria-label="站点筛选与排序">
                 <label class="toolbar-search">
                   <span class="visually-hidden">搜索收藏站点</span>
                   <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
@@ -87,6 +88,15 @@
                   <option value="all">全部分类</option>
                   <option value="gongyi">仅公益站</option>
                   <option value="relay">仅中转站</option>
+                </select>
+                <select class="select" id="listTag" aria-label="按标签筛选站点">
+                  <option value="all">全部标签</option>
+                </select>
+                <select class="select" id="listSort" aria-label="站点排序">
+                  <option value="current">当前顺序</option>
+                  <option value="name">按名称</option>
+                  <option value="updated">按最近更新</option>
+                  <option value="health">按健康状态</option>
                 </select>
               </div>
 
@@ -98,7 +108,7 @@
               </div>
 
               <div class="site-table-head" aria-hidden="true">
-                <span></span><span>站点</span><span>分类与类型</span><span>余额</span><span>Key</span><span>操作</span>
+                <span></span><span>站点</span><span>分类与类型</span><span>余额</span><span>Key</span><span>健康状态</span><span>操作</span>
               </div>
               <div class="site-list" id="siteList" aria-label="收藏站点列表"></div>
             </div>
@@ -115,8 +125,8 @@
 
           <div class="two-column-workspace">
             <section class="panel">
-              <header class="panel-header">
-                <div><h3 class="panel-title">导入站点</h3><p class="panel-description">支持本扩展 JSON 与 All API Hub 格式。</p></div>
+                <header class="panel-header">
+                  <div><h3 class="panel-title">导入站点</h3><p class="panel-description">支持本扩展 JSON 与 All API Hub 格式；单次最多 1000 个站点、2 MB。</p></div>
               </header>
               <div class="panel-body stack">
                 <div class="field paste-source">
@@ -183,17 +193,27 @@
             <article class="diagnostic-summary"><span>站点</span><strong id="diagnosticSiteCount">—</strong><small>本机收藏</small></article>
             <article class="diagnostic-summary"><span>完整 Key</span><strong id="diagnosticKeyCount">—</strong><small>可复制使用</small></article>
             <article class="diagnostic-summary"><span>余额失败</span><strong id="diagnosticFailureCount">—</strong><small>需要处理</small></article>
+            <article class="diagnostic-summary"><span>孤立授权</span><strong id="diagnosticOrphanedCount">—</strong><small>可清理权限</small></article>
           </section>
 
           <section class="panel" id="diagnosticsCard">
             <header class="panel-header"><div><h3 class="panel-title">需要处理</h3><p class="panel-description">按风险排序，只保留可执行动作。</p></div></header>
             <div class="panel-body issue-list">
-              <article class="issue-row">
+              <div class="diagnostics-all-clear" id="diagnosticsAllClear" role="status" hidden>
+                <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span>
+                <div class="issue-copy"><strong>当前没有需要处理的问题</strong><p>站点授权、余额状态和本机权限都处于可用状态。</p></div>
+              </div>
+              <article class="issue-row" id="unauthorizedPermissionIssue">
                 <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.7 3.3 7.8 8 9 4.7-1.2 8-4.3 8-9V7z"/></svg></span>
                 <div class="issue-copy"><strong>站点访问权限</strong><p>只为尚未授权的收藏站申请 HTTPS 访问。</p></div>
                 <div class="issue-actions"><button type="button" class="btn btn-sm" id="grantUnauthorizedSites">授权未授权站</button></div>
               </article>
-              <article class="issue-row">
+              <article class="issue-row" id="orphanedPermissionIssue" hidden>
+                <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.7 3.3 7.8 8 9 4.7-1.2 8-4.3 8-9V7zM9 12h6"/></svg></span>
+                <div class="issue-copy"><strong>孤立站点授权</strong><p>本机仍保留不再收藏的 HTTPS 权限，不会显示真实域名。</p></div>
+                <div class="issue-actions"><button type="button" class="btn btn-sm" id="cleanupOrphanedAccess">清理孤立授权</button></div>
+              </article>
+              <article class="issue-row" id="failedBalanceIssue">
                 <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></span>
                 <div class="issue-copy"><strong>余额失败站点</strong><p>先重试，仍失败时打开站点恢复登录状态。</p></div>
                 <div class="issue-actions">
@@ -201,6 +221,11 @@
                   <button type="button" class="btn btn-sm" id="openFailedBalanceSites">打开失败站</button>
                   <button type="button" class="btn btn-sm" id="openLoginFailedSites">打开未登录站</button>
                 </div>
+              </article>
+              <article class="issue-row" id="maintenanceIssue" hidden>
+                <span class="issue-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 8v4l2.5 1.5M20 12a8 8 0 1 1-2.34-5.66"/></svg></span>
+                <div class="issue-copy"><strong>本机维护未完成</strong><p>恢复快照清理暂未完成；不会自动访问站点，重新检查后再处理。</p></div>
+                <div class="issue-actions"><button type="button" class="btn btn-sm" id="refreshMaintenance">重新检查</button></div>
               </article>
             </div>
             <details class="technical-details">
@@ -248,7 +273,11 @@
       </section>
 
       <section id="batchDrawerPanel" data-drawer-panel="batch" hidden>
-        <div class="field"><label for="batchUrls">每行一个，或用逗号分隔</label><textarea class="textarea mono" id="batchUrls" placeholder="https://a.example.com&#10;b.example.com"></textarea></div>
+        <div class="field">
+          <label for="batchUrls">每行一个，或用逗号分隔</label>
+          <textarea class="textarea mono" id="batchUrls" placeholder="https://a.example.com&#10;b.example.com"></textarea>
+          <span class="field-hint">为防止凭据串站，批量添加不会读取或保存 API Key；完成后可在各站点中单独添加。</span>
+        </div>
         <div class="notice drawer-detection" data-tone="info" id="batchPreview">结果会显示在这里。</div>
       </section>
 

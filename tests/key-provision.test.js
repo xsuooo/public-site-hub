@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createKeyProvisionService } = require('../key-provision.js');
+const utils = require('../site-utils.js');
+const storage = require('../storage.js');
 
 function makeHarness({ sites: initialSites, scanResult, createResult, verifyResult } = {}) {
   let sites = structuredClone(initialSites || [{
@@ -285,4 +287,67 @@ test('concurrent requests for one site share a single create operation', async (
   assert.equal(b.ok, true);
   assert.equal(h.calls().createCalls, 1);
   assert.equal(h.getSites()[0].keys.length, 1);
+});
+
+test('site deletion is rejected while automatic Key creation holds the shared lock', async () => {
+  const initial = [
+    utils.normalizeSite({ id: 'site-1', domain: 'locked.example.com', type: 'newapi', keys: [] }),
+    utils.normalizeSite({ id: 'site-2', domain: 'other.example.com', type: 'newapi', keys: [] })
+  ];
+  let memory = { sites: structuredClone(initial) };
+  globalThis.chrome = {
+    runtime: {},
+    storage: {
+      local: {
+        get(_keys, callback) { callback(memory); },
+        set(patch, callback) {
+          memory = { ...memory, ...structuredClone(patch) };
+          callback();
+        }
+      }
+    }
+  };
+  Object.assign(globalThis, utils);
+
+  let signalCreateStarted;
+  let releaseCreate;
+  const createStarted = new Promise((resolve) => { signalCreateStarted = resolve; });
+  const createGate = new Promise((resolve) => { releaseCreate = resolve; });
+  const service = createKeyProvisionService({
+    loadSites: storage.loadSites,
+    saveSites: storage.saveSites,
+    mutateSites: storage.mutateSites,
+    tryAcquireSiteOperation: storage.tryAcquireSiteOperation,
+    readSession: async () => ({ tabId: 17, token: 'session-token' }),
+    verify: async () => ({ ok: true, userId: '1' }),
+    scan: async () => ({ trustedKeys: [], tokenListState: 'empty' }),
+    create: async () => {
+      signalCreateStarted();
+      await createGate;
+      return { ok: true, created: true, key: { name: '公益站收藏', key: 'sk-locked-created-0123456789' } };
+    },
+    merge: async (site, keys) => ({ ...site, keys: [...(site.keys || []), ...keys] })
+  });
+
+  const creating = service.ensureSiteKey('site-1', { allowCreate: true });
+  await createStarted;
+
+  await assert.rejects(
+    storage.removeSiteById('site-1'),
+    (error) => error?.code === 'site_operation_busy'
+  );
+  await assert.rejects(
+    storage.removeSitesByIds(['site-1', 'site-2']),
+    (error) => error?.code === 'site_operation_busy'
+  );
+  assert.deepEqual((await storage.loadSites()).map((site) => site.id).sort(), ['site-1', 'site-2']);
+
+  releaseCreate();
+  const created = await creating;
+  assert.equal(created.ok, true);
+  assert.equal(created.outcome, 'created');
+  assert.equal((await storage.loadSites()).find((site) => site.id === 'site-1').keys.length, 1);
+
+  const remaining = await storage.removeSiteById('site-1');
+  assert.deepEqual(remaining.map((site) => site.id), ['site-2']);
 });

@@ -5,7 +5,8 @@ const original = {
   mutateSites: globalThis.mutateSites,
   sameSiteDomain: globalThis.sameSiteDomain,
   recordBalanceSuccess: globalThis.recordBalanceSuccess,
-  recordBalanceFailure: globalThis.recordBalanceFailure
+  recordBalanceFailure: globalThis.recordBalanceFailure,
+  isBalanceRefreshAttemptCurrent: globalThis.isBalanceRefreshAttemptCurrent
 };
 
 globalThis.sameSiteDomain = (a, b) => String(a) === String(b);
@@ -58,6 +59,30 @@ test('balance persistence rejects a result from an old sibling port', async () =
 
   assert.equal(snapshot[0].balance, undefined);
   assert.equal(snapshot[0].baseUrl, 'https://port-balance.example.com:9443');
+});
+
+test('balance persistence rejects a result whose attempt was replaced', async () => {
+  let snapshot = [{
+    id: 'site-attempt',
+    domain: 'attempt-balance.example.com',
+    baseUrl: 'https://attempt-balance.example.com',
+    type: 'newapi',
+    keys: [],
+    balance: '$new'
+  }];
+  globalThis.mutateSites = async (mutator) => {
+    snapshot = await mutator(snapshot);
+    return snapshot;
+  };
+  globalThis.isBalanceRefreshAttemptCurrent = async () => false;
+
+  const result = await persistBalanceResult(snapshot[0], {
+    ok: true,
+    balance: '$old'
+  }, { attemptId: 'attempt-old' });
+
+  assert.equal(result, null);
+  assert.equal(snapshot[0].balance, '$new');
 });
 
 test.after(() => {
