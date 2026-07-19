@@ -6,13 +6,13 @@
 
 ## 候选信息
 
-- 提交 SHA：`cdfc253fc5e76265be06de9b7883d1ff218283c5`
+- 提交 SHA：见 `v1.0.0-rc.2` 标签（标签创建后与发布记录一致）
 - Git 标签：`v1.0.0-rc.2`
 - Manifest 版本：`0.99.0.2`
 - ZIP 文件：`public-site-hub-1.0.0-rc.2.zip`
-- ZIP SHA-256：`6a215dc47822e4e3fef89f015c0012ae6699889c86db56d1bd9dd1a0f459e6c3`
+- ZIP SHA-256：见 `docs/rc/rc-2-release-record.md`
 - 外部 attestation：`public-site-hub-1.0.0-rc.2.attestation.json`
-- attestation SHA-256：`3dc2ffc72018ec50a964b94e85f334dd66bbdb529a0e7b9eb9399ca6cabc2740`
+- attestation SHA-256：见发布记录
 - 构建日期：2026-07-19
 - 构建执行人：本地维护者
 
