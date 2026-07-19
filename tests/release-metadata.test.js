@@ -153,8 +153,9 @@ test('RC documentation fixes immutable artifacts, single-tester dual-browser mat
 
 test('superseded 2.x verification documents are archived with explicit banners', () => {
   const legacyEntry = read('docs/runtime-verification-1.0.md');
-  assert.match(legacyEntry, /由 `1\.0\.0-rc\.1` 验收流程接管/);
+  assert.match(legacyEntry, /由 `1\.0\.0-rc\.2` 验收流程接管/);
   assert.match(legacyEntry, /rc\/README\.md/);
+  assert.match(legacyEntry, /单人双浏览器/);
 
   for (const version of ['2.2.0', '2.3.0', '2.3.2']) {
     const archived = read(`docs/archive/runtime-verification-${version}.md`);
