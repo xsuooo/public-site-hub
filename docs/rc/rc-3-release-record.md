@@ -6,15 +6,15 @@
 
 ## 源码与构建
 
-- 当前开发分支：源码冻结后填写
-- 候选提交 SHA：待源码冻结后填写
-- Git tree：待源码冻结后填写
-- Git 标签：`v1.0.0-rc.3`（待创建）
+- 当前开发分支：`main`
+- 候选提交 SHA：`a7d3b42311578b5bc87a1e36806c231025a44e99`
+- Git tree：`4d465bcf6a16b4fb71bae4c87610463fb700a337`
+- Git 标签：`v1.0.0-rc.3`
 - Manifest 版本：`0.99.0.3`
-- 构建执行人：待填写
-- 构建时间：待填写
-- Node.js / npm：待填写
-- 工作树在构建前是否干净：待确认
+- 构建执行人：`xsu`
+- 构建时间：`2026-07-21 03:01:40 +08:00`
+- Node.js / npm：`v24.17.0` / `11.13.0`
+- 工作树在构建前是否干净：是（标签 detached worktree）
 - 验收模型：**单人双浏览器**（Chrome Stable + Edge Stable，独立 profile）
 
 ## 当前自动化证据
@@ -36,12 +36,12 @@
 
 本地路径（gitignore，勿提交）：`release-artifacts/`
 
-- ZIP：`public-site-hub-1.0.0-rc.3.zip`（待生成）
-- ZIP 字节数：待生成
-- SHA-256：待生成
-- SHA-256 文件：`public-site-hub-1.0.0-rc.3.zip.sha256`（待生成）
-- 外部 attestation：`public-site-hub-1.0.0-rc.3.attestation.json`（待生成）
-- 第二个 detached worktree 复现 SHA-256：待生成
+- ZIP：`public-site-hub-1.0.0-rc.3.zip`
+- ZIP 字节数：`542742`
+- SHA-256：`39b646965526f8b7222508009b532effa4f5183eaabb9dc4314c69f5749971b0`
+- SHA-256 文件：`public-site-hub-1.0.0-rc.3.zip.sha256`
+- 外部 attestation：`public-site-hub-1.0.0-rc.3.attestation.json`
+- 第二个 detached worktree 复现 SHA-256：一致（`39b646965526f8b7222508009b532effa4f5183eaabb9dc4314c69f5749971b0`）
 
 ## 单人双浏览器验收
 
@@ -58,8 +58,8 @@
 
 - [x] 自动化与包完整性门禁通过。
 - [x] 自动化阶段 P0、P1 和阻断型 P2 为零。
-- [ ] 源码已冻结、标签已创建且未移动。
-- [ ] 两个 detached worktree 生成一致 ZIP SHA-256。
+- [x] 源码已冻结、标签已创建且未移动；后续记录提交不改变标签绑定。
+- [x] 两个 detached worktree 生成一致 ZIP SHA-256。
 - [ ] Chrome + Edge 单人验收完成。
 - [ ] P0、P1 和阻断型 P2 为零；延期项已批准。
 - [ ] 测试凭据和 profile 清理责任人与截止日期已记录。
