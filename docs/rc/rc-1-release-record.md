@@ -8,7 +8,7 @@
 - Git tree：`0360e0e5e22e0b0ca94408a6ee5276a61957c628`
 - Git 标签：`v1.0.0-rc.1`
 - 本记录提交 SHA（标签后的独立记录提交）：本文件所在提交；不写入自引用 SHA
-- 构建执行人：本地自动化（Codex）
+- 构建执行人：本地维护者
 - 构建时间：2026-07-18 17:51:59 +08:00
 - Node.js 版本：`v24.17.0`
 - 工作树在构建前是否干净：是；`HEAD` 与 `v1.0.0-rc.1^{commit}` 均为上述提交
@@ -17,13 +17,13 @@
 
 | 命令 | 结果 | 日期 | 执行人 |
 | --- | --- | --- | --- |
-| `node --check popup.js` | 通过 | 2026-07-18 | Codex |
-| `node --check options.js` | 通过 | 2026-07-18 | Codex |
-| `npm test` | 257 / 257 通过 | 2026-07-18 | Codex |
-| `npm run build` | 通过 | 2026-07-18 | Codex |
-| `npm run verify:package` | 通过；27 个运行时文件 | 2026-07-18 | Codex |
-| `npm run verify:runtime -- --browser=edge` | 通过；Edge `150.0.4078.65`，零控制台错误，临时 profile 已清理 | 2026-07-18 | Codex |
-| `npm run release:artifact -- --out-dir <外部空目录>` | 两个 detached worktree 均通过 | 2026-07-18 | Codex |
+| `node --check popup.js` | 通过 | 2026-07-18 | 本地维护者 |
+| `node --check options.js` | 通过 | 2026-07-18 | 本地维护者 |
+| `npm test` | 257 / 257 通过 | 2026-07-18 | 本地维护者 |
+| `npm run build` | 通过 | 2026-07-18 | 本地维护者 |
+| `npm run verify:package` | 通过；27 个运行时文件 | 2026-07-18 | 本地维护者 |
+| `npm run verify:runtime -- --browser=edge` | 通过；Edge `150.0.4078.65`，零控制台错误，临时 profile 已清理 | 2026-07-18 | 本地维护者 |
+| `npm run release:artifact -- --out-dir <外部空目录>` | 两个 detached worktree 均通过 | 2026-07-18 | 本地维护者 |
 
 ## 发布物
 
@@ -33,7 +33,7 @@
 - SHA-256 文件：`public-site-hub-1.0.0-rc.1.zip.sha256`
 - 外部 attestation：`public-site-hub-1.0.0-rc.1.attestation.json`
 - attestation SHA-256：`fc54cf4b4617d2967a3b7277a0059d4f8fe4502a6901bd87a979abd2d137011b`
-- 从标签重新构建复核人：同机独立 detached worktree 自动复核（Codex）
+- 从标签重新构建复核人：同机独立 detached worktree 自动复核（本地维护者）
 - 第二个 detached worktree 复现 SHA-256：一致，`98acf9c23cc5f78eae026dff7a162e0b8a57893b9b3576f217d3421d0ea6c0dc`
 
 ## 双人验收

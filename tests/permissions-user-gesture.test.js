@@ -81,6 +81,36 @@ test('permission origin collection deduplicates and error mapping stays Chinese'
   );
 });
 
+test('foreground permission request batches every saved site into one prompt', async () => {
+  const previousChrome = global.chrome;
+  const calls = [];
+  global.chrome = {
+    runtime: { lastError: null },
+    permissions: {
+      request(details, callback) {
+        calls.push(details);
+        callback(true);
+      }
+    }
+  };
+
+  try {
+    const result = await requestSiteAccessFromGesture([
+      { baseUrl: 'https://one.example.invalid/' },
+      { baseUrl: 'https://two.example.invalid:8443/console' },
+      { baseUrl: 'https://one.example.invalid/duplicate' }
+    ]);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.origins, [
+      'https://one.example.invalid/*',
+      'https://two.example.invalid:8443/*'
+    ]);
+    assert.deepEqual(calls, [{ origins: result.origins }]);
+  } finally {
+    global.chrome = previousChrome;
+  }
+});
+
 test('background-safe access checks default to no permission request', async () => {
   const previousChrome = global.chrome;
   let requests = 0;

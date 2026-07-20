@@ -142,7 +142,11 @@ function resolveErrorAction(res, site, preferredRetry = 'refreshBalance') {
           return;
         }
         if (!again.ok) {
-          toast(again.error || '仍未获得权限', 'err', resolveErrorAction(again, target, preferredRetry));
+          if (preferredRetry === 'ensureSiteKey') {
+            await handleKeyProvisionFailure(again, target);
+          } else {
+            toast(again.error || '仍未获得权限', 'err', resolveErrorAction(again, target, preferredRetry));
+          }
           if (again.sites) {
             state.sites = again.sites;
             render();
@@ -226,32 +230,26 @@ function resolveErrorAction(res, site, preferredRetry = 'refreshBalance') {
     };
   }
 
-  if (
-    effectiveCode === 'not_logged_in'
-    || effectiveCode === 'parse_failed'
-    || effectiveCode === 'network_error'
-    || effectiveCode === 'timeout'
-    || effectiveCode === 'tab_open_failed'
-    || res?.action === 'open_site'
-    || /未登录|个人中心|登录态|请先登录|超时|无响应/.test(err)
-  ) {
-    if (!siteId) return null;
-    return {
-      label: '打开站点',
-      run: async () => {
-        const target = findSite();
-        if (!target) return;
-        const openUrl = typeof openUrlForSite === 'function'
-          ? openUrlForSite(target)
-          : (target.domain ? `https://${target.domain}/` : target.baseUrl);
-        const opened = await send('openUrl', { url: openUrl, siteId: target.id });
-        if (!opened.ok) toast(opened.error || '打开站点失败', 'err');
-        else toast('已打开站点', 'ok');
-      }
-    };
-  }
-
   return null;
+}
+
+async function handleKeyProvisionFailure(res, site) {
+  const code = String(res?.code || '');
+  const needsTokenPage = code === 'login_tab_required'
+    || code.startsWith('token_list_')
+    || code === 'unsupported_site_type'
+    || res?.action === 'open_token';
+  if (needsTokenPage && site?.id) {
+    const opened = await send('openTokenPage', { id: site.id, background: true });
+    toast(
+      opened.ok
+        ? '已打开令牌页，请完成登录或 Key 操作后再点「获取 Key」'
+        : (opened.error || '打开令牌页失败'),
+      opened.ok ? '' : 'err'
+    );
+    return;
+  }
+  toast(res?.error || '自动获取 Key 失败', 'err', resolveErrorAction(res, site, 'ensureSiteKey'));
 }
 
 function autoKeyButtonLabel(site) {
@@ -272,13 +270,6 @@ function balanceErrorActionMeta(site) {
   }
   if (action === 'open_token' || code === 'login_tab_required') {
     return { act: 'open-token', label: '打开令牌页' };
-  }
-  if (code === 'not_logged_in' || code === 'parse_failed' || code === 'network_error'
-    || code === 'timeout' || code === 'tab_open_failed' || action === 'open_site') {
-    return { act: 'open', label: '打开站点' };
-  }
-  if (site?.balanceStatus?.status === 'failed') {
-    return { act: 'open', label: '打开站点' };
   }
   return null;
 }
@@ -624,6 +615,7 @@ function renderHealthSummary() {
   $('overviewTitle').textContent = `已收藏 ${total} 个站点`;
   $('overviewSubline').textContent = '站点、接口地址与 Key 都在这里';
   $('listScope').textContent = String(total);
+  if ($('grantAllSites')) $('grantAllSites').hidden = total === 0;
   document.querySelectorAll('#healthSummary [data-health]').forEach((btn) => {
     const active = btn.dataset.health === state.healthFilter;
     btn.classList.toggle('active', active);
@@ -729,17 +721,19 @@ function render() {
       </div>`;
     }).join('');
 
+    const balanceFix = site.balanceStatus?.status === 'failed'
+      ? balanceErrorActionMeta(site)
+      : null;
     const errorHtml = site.balanceStatus?.status === 'failed'
       ? (() => {
         const message = popupBalanceErrorMessage(site);
-        const fix = balanceErrorActionMeta(site);
         return `<div class="inline-error">
           <div class="notice" data-tone="danger" role="alert">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.7 3.8 16a2 2 0 0 0 1.7 3h13a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/></svg>
             <span>${escapeHtml(message)}</span>
           </div>
           <div class="inline-actions">
-            ${fix ? `<button type="button" class="btn btn-soft btn-sm" data-act="${escapeAttr(fix.act)}">${escapeHtml(fix.label)}</button>` : ''}
+            ${balanceFix ? `<button type="button" class="btn btn-soft btn-sm" data-act="${escapeAttr(balanceFix.act)}">${escapeHtml(balanceFix.label)}</button>` : ''}
             <button type="button" class="btn btn-sm" data-act="refresh">再查余额</button>
           </div>
         </div>`;
@@ -793,7 +787,6 @@ function render() {
         </div>
       </div>`}
       <footer class="site-card-actions">
-        <button class="btn btn-sm" type="button" data-act="open">打开站点</button>
         <button class="btn btn-sm" type="button" data-act="copy-client">复制接口地址</button>
         ${defKey
           ? `<button class="btn btn-sm" type="button" data-act="copy-key" data-key-id="${escapeAttr(defKey.id)}">复制 Key</button>`
@@ -1158,6 +1151,20 @@ $('stopBalanceRefresh')?.addEventListener('click', async () => {
 
 $('openOptions2').addEventListener('click', () => openOptions());
 
+$('grantAllSites')?.addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  if (!state.sites.length || typeof requestSiteAccessFromGesture !== 'function') return;
+  button.disabled = true;
+  toast(`正在请求 ${state.sites.length} 个收藏站点的访问权限…`);
+  const access = await requestSiteAccessFromGesture(state.sites);
+  button.disabled = false;
+  if (!access.ok) {
+    toast(access.error || '未获得站点访问权限', 'err');
+    return;
+  }
+  toast(`已授权 ${access.origins.length} 个站点，后续操作不再逐站询问`, 'ok');
+});
+
 async function runQuickBalanceAction(type, payload, busyMsg) {
   await runMutation(async () => {
     toast(busyMsg);
@@ -1315,7 +1322,7 @@ $('list').addEventListener('click', async (e) => {
       btn.disabled = false;
       if (!res.ok) {
         if (res.sites) state.sites = res.sites;
-        toast(res.error || '自动获取 Key 失败', 'err', resolveErrorAction(res, site, 'ensureSiteKey'));
+        await handleKeyProvisionFailure(res, site);
         if (res.sites) render();
         return;
       }

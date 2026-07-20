@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "公益站收藏",
-  "version": "0.99.0.2",
-  "version_name": "1.0.0-rc.2",
+  "version": "0.99.0.3",
+  "version_name": "1.0.0-rc.3",
   "description": "一键收藏公益/中转站：就地加 Key、复制调用、查看余额、导入导出",
   "permissions": [
     "storage",
     "alarms",
     "tabs",
-    "cookies",
     "activeTab",
     "scripting",
     "contextMenus"

@@ -7,6 +7,7 @@ const root = path.join(__dirname, '..');
 const RUNTIME_FILES = Object.freeze([
   'manifest.json',
   'background.js',
+  'message-contract.js',
   'balance-format.js',
   'balance-refresh.js',
   'balance.js',

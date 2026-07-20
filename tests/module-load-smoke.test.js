@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 
 const LOAD_ORDER = [
+  'message-contract.js',
   'site-utils.js',
   'permissions.js',
   'site-tabs.js',
@@ -66,6 +67,7 @@ test('classic script graph boots without throw and exposes core APIs', () => {
   }
 
   assert.equal(typeof context.ensureSiteAccess, 'function');
+  assert.equal(typeof context.PublicSiteMessageContract?.validateRuntimeMessage, 'function');
   assert.equal(typeof context.countUnauthorizedSites, 'function');
   assert.equal(typeof context.ensureSiteTab, 'function');
   assert.equal(typeof context.openFailedBalanceSites, 'function');

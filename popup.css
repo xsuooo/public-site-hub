@@ -53,6 +53,17 @@ body {
   min-height: 32px;
 }
 
+.popup-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.popup-header-actions .btn {
+  padding-inline: 7px;
+}
+
 .popup-action-row {
   gap: 8px;
 }

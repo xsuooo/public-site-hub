@@ -7,7 +7,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,14 +21,31 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Unit and package regression
+      - name: JavaScript syntax
+        run: npm run verify:syntax
+
+      - name: Unit regression
         run: npm test
+
+      - name: Coverage report
+        run: npm run test:coverage
 
       - name: Build extension package
         run: npm run build
 
       - name: Verify runtime whitelist
         run: npm run verify:package
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Chromium extension runtime smoke
+        run: npm run verify:runtime -- --browser=chromium
+
+      - name: Playwright extension UI gate
+        env:
+          PUBLIC_SITE_HUB_BROWSER: chromium
+        run: npm run verify:ui
 
       - name: High-severity dependency audit
         run: npm audit --audit-level=high

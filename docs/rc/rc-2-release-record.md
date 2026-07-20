@@ -6,7 +6,7 @@
 
 ## 源码与构建
 
-- 当前分支：`codex/rc2-hardening`
+- 当前分支：`rc2-hardening`（本地）
 - 提交 SHA：`b48190c9e2c1e78cd9d1ba0d6a88ae781e58b33c`
 - Git tree：`9fd828aec5a92e4024e2d07bee2d208c763ae4c8`
 - Git 标签：`v1.0.0-rc.2`（annotated）

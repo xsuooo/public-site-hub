@@ -5,7 +5,7 @@
 - 每个 RC 对应唯一源码提交、唯一注释 Git 标签、唯一 ZIP、唯一 SHA-256 和唯一外部 attestation。
 - 已分发文件永不覆盖、重打包或静默替换，即使文件名看似相同。
 - ZIP 必须由 `npm run release:artifact` 在标签对应的干净 detached worktree 中重新构建，不得从手工修改目录打包。
-- 测试者收到的 ZIP 摘要必须与当前 RC 对应的发布记录一致；当前候选使用 `rc-2-release-record.md`，历史 rc.1 记录不得覆盖。
+- 测试者收到的 ZIP 摘要必须与当前 RC 对应的发布记录一致；当前候选使用 `rc-3-release-record.md`，历史 rc.1/rc.2 记录不得覆盖。
 - 修复后必须提升 RC 编号并生成全新标签、文件名、摘要和验收记录。
 - 发布脚本固定 ZIP 根布局、UTF-8 字节排序、1980-01-01 时间戳和 `store` 模式；`manifest.json` 必须位于 ZIP 根目录。
 - ZIP、`.zip.sha256` 和 `.attestation.json` 保存在 Git 外部，已有同名文件时不得覆盖。attestation 记录标签、commit、tree、ZIP 字节数、SHA-256 和完整运行时文件清单。
@@ -17,6 +17,7 @@
 | --- | --- | --- | --- |
 | `1.0.0-rc.1` | `0.99.0.1` | `v1.0.0-rc.1` | `public-site-hub-1.0.0-rc.1.zip` |
 | `1.0.0-rc.2` | `0.99.0.2` | `v1.0.0-rc.2` | `public-site-hub-1.0.0-rc.2.zip` |
+| `1.0.0-rc.3` | `0.99.0.3` | `v1.0.0-rc.3` | `public-site-hub-1.0.0-rc.3.zip` |
 | `1.0.0` | `1.0.0` | `v1.0.0` | `public-site-hub-1.0.0.zip` |
 
 Manifest 版本按 Chrome 的最多四段整数规则比较；每个后继 RC 和正式版都必须比已分发版本严格递增。

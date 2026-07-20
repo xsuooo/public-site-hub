@@ -2,7 +2,7 @@
 
 公益站收藏是一个 Manifest V3 浏览器扩展，用于收藏公益或中转 API 站点、管理本地 Key、查看余额，以及导入或导出站点数据。
 
-当前发布目标是 `1.0.0-rc.2`，面向**单名可信测试者**，须在 Chrome Stable 与 Edge Stable 上各用独立 profile 验收。它不是公开发布版本，也不得使用生产账号或生产 Key 验收；`1.0.0-rc.1` 资料仅作为历史记录保留。
+当前开发目标是 `1.0.0-rc.3`，面向**单名可信测试者**，须在 Chrome Stable 与 Edge Stable 上各用独立 profile 验收。它不是公开发布版本，也不得使用生产账号或生产 Key 验收；`1.0.0-rc.2` 的标签、ZIP 与验收资料保持不可变，仅作为上一候选的历史记录。
 
 ## 主要能力
 
@@ -14,12 +14,15 @@
 - 仅使用 `alarms` 每日清理过期本机恢复快照，不会定时访问站点或自动刷新余额。
 - 导入前预览新增、更新和跳过数量；支持脱敏导出、完整导出和替换导入快照。
 - 导入单次限制为 2 MB、1000 个站点；预览后站点数据发生变化时必须重新预览。
+- 站点和恢复快照写入前会预检浏览器本地存储配额；空间不足时整次写入取消，不会部分覆盖现有数据。
 - 诊断页可查看并清理不再对应收藏站点的孤立 HTTPS 授权，复制内容不包含真实域名。
 - 手动复制脱敏诊断；项目不包含遥测、远程日志或自动上传。
 
 ## RC 安装
 
 测试者应收到版本化 ZIP、对应的 SHA-256 和外部 attestation，不应收到会被静默覆盖的固定文件名。
+
+当前源码是 rc.3 开发状态，尚未生成 rc.3 标签或 ZIP。rc.3 验收资料已独立建立，其中提交、标签和制品摘要保持待填写，不能在候选冻结前签署。
 
 1. 校验 ZIP 的 SHA-256 与发布记录一致。
 2. 将 ZIP 解压到一个新的、版本独立的目录，不覆盖旧 RC。
@@ -56,6 +59,7 @@ npm run verify:ui
 ```powershell
 npm test
 npm run test:coverage
+npm run verify:syntax
 npm run build
 npm run verify:package
 npm run verify:runtime
@@ -64,6 +68,7 @@ npm run verify:ui
 
 - `npm test`：运行自动化测试。
 - `npm run test:coverage`：生成本地覆盖率结果。
+- `npm run verify:syntax`：递归检查源码、脚本和测试中的 JavaScript 语法。
 - `npm run build`：生成 `dist/`。
 - `npm run verify:package`：校验 `dist/` 只包含允许的运行时文件。
 - `npm run verify:runtime`：在 Edge/Chromium 真实扩展上下文执行无凭据自动冒烟检查；它不替代 Chrome Stable 手工验收。
@@ -76,7 +81,7 @@ npm run verify:ui
 - `storage`：在 `chrome.storage.local` 中保存站点、Key、偏好、迁移状态和未完成批量任务。
 - `alarms`：仅唤醒本地维护任务，清理超过保留期的恢复快照；不执行网络请求。
 - `tabs`：在用户主动打开站点、识别、导入 Key 或查询余额时读取或创建相关标签页。
-- `cookies`：在用户主动操作时读取当前测试站点的登录会话；不会读取浏览器保存的密码。
+- 扩展不申请 `cookies` 权限；需要登录状态的余额和 Key 操作在用户已打开或扩展临时打开的目标站标签页内执行，由浏览器按 Origin、路径与 Cookie 属性处理会话。
 - `activeTab`：在用户点击扩展或右键入口时临时访问当前页面。
 - `scripting`：仅在用户发起识别、余额、页面 Key 导入或获取 Key 流程时注入站点脚本。
 - `contextMenus`：提供右键收藏入口。
@@ -93,10 +98,11 @@ npm run verify:ui
 ## RC 发布资料
 
 - [RC 流程总览](docs/rc/README.md)
-- [RC 验收清单](docs/rc/rc-2-acceptance.md)
-- [单人双浏览器测试矩阵](docs/rc/rc-2-test-matrix.md)
-- [问题反馈模板](docs/rc/rc-2-feedback-template.md)
-- [问题台账](docs/rc/rc-2-findings.md)
+- [RC 验收清单](docs/rc/rc-3-acceptance.md)
+- [单人双浏览器测试矩阵](docs/rc/rc-3-test-matrix.md)
+- [问题反馈模板](docs/rc/rc-3-feedback-template.md)
+- [问题台账](docs/rc/rc-3-findings.md)
+- [发布记录](docs/rc/rc-3-release-record.md)
 - [凭据清理清单](docs/rc/credential-cleanup.md)
 - [不可变发布与撤回规则](docs/rc/immutable-release-policy.md)
 - [架构方案与当前选择](docs/architecture-decision.md)
@@ -105,7 +111,7 @@ npm run verify:ui
 维护者只能在干净、正好指向版本注释标签的独立 worktree 中生成候选物：
 
 ```powershell
-npm run release:artifact -- --out-dir ../public-site-hub-rc2-artifacts
+npm run release:artifact -- --out-dir ../public-site-hub-rc3-artifacts
 ```
 
 该命令会重新构建并校验 `dist/`，再生成确定性 ZIP、标准 `.sha256` sidecar 和 Git 外部 attestation；已有同名文件时会拒绝覆盖。完整的标签、复现和发布记录顺序以 [RC 流程总览](docs/rc/README.md) 为准。

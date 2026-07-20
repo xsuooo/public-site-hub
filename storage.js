@@ -9,6 +9,8 @@
   const SITE_DATA_SCHEMA_VERSION = 5;
   const MAX_SITE_BACKUPS = 3;
   const SITE_BACKUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
+  const STORAGE_QUOTA_SAFETY_RATIO = 0.95;
 
   /**
    * 有序迁移：键为「目标版本号」。从 meta.schemaVersion 起逐级 +1 直到 SITE_DATA_SCHEMA_VERSION。
@@ -110,7 +112,59 @@
     });
   }
 
-  function chromeStorageSet(data) {
+  function chromeStorageGetBytesInUse(keys = null) {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage?.local?.getBytesInUse) {
+        resolve(null);
+        return;
+      }
+      try {
+        chrome.storage.local.getBytesInUse(keys, (bytes) => {
+          if (chrome.runtime?.lastError) resolve(null);
+          else resolve(Number.isFinite(Number(bytes)) ? Number(bytes) : null);
+        });
+      } catch (error) {
+        resolve(null);
+      }
+    });
+  }
+
+  function utf8ByteLength(value) {
+    const text = String(value ?? '');
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(text).length;
+    if (typeof Buffer !== 'undefined') return Buffer.byteLength(text, 'utf8');
+    return unescape(encodeURIComponent(text)).length;
+  }
+
+  async function assertStorageCapacityForSet(data) {
+    const keys = Object.keys(data || {});
+    if (!keys.length) return null;
+    const [totalBytes, replacedBytes] = await Promise.all([
+      chromeStorageGetBytesInUse(null),
+      chromeStorageGetBytesInUse(keys)
+    ]);
+    if (totalBytes == null || replacedBytes == null) return null;
+
+    const configuredQuota = Number(chrome.storage?.local?.QUOTA_BYTES);
+    const quotaBytes = Number.isFinite(configuredQuota) && configuredQuota > 0
+      ? configuredQuota
+      : DEFAULT_STORAGE_QUOTA_BYTES;
+    const replacementBytes = utf8ByteLength(JSON.stringify(data));
+    const projectedBytes = Math.max(0, totalBytes - replacedBytes) + replacementBytes;
+    const safeLimitBytes = Math.floor(quotaBytes * STORAGE_QUOTA_SAFETY_RATIO);
+    if (projectedBytes <= safeLimitBytes) {
+      return { totalBytes, replacedBytes, replacementBytes, projectedBytes, quotaBytes };
+    }
+
+    const error = new Error('本地存储空间不足，已取消写入；请清理恢复快照或减少导入内容后重试');
+    error.code = 'storage_quota_exceeded';
+    error.projectedBytes = projectedBytes;
+    error.quotaBytes = quotaBytes;
+    throw error;
+  }
+
+  async function chromeStorageSet(data, options = {}) {
+    if (options.preflight === true) await assertStorageCapacityForSet(data);
     return new Promise((resolve, reject) => {
       if (typeof chrome === 'undefined' || !chrome.storage?.local) {
         reject(new Error('chrome.storage unavailable'));
@@ -118,8 +172,16 @@
       }
       chrome.storage.local.set(data, () => {
         const err = chrome.runtime?.lastError;
-        if (err) reject(new Error(err.message));
-        else resolve();
+        if (!err) {
+          resolve();
+          return;
+        }
+        const quotaFailure = /quota|空间|storage limit/i.test(String(err.message || ''));
+        const error = new Error(quotaFailure
+          ? '本地存储空间不足，写入未完成；请清理恢复快照或减少导入内容后重试'
+          : err.message);
+        if (quotaFailure) error.code = 'storage_quota_exceeded';
+        reject(error);
       });
     });
   }
@@ -398,7 +460,7 @@
         schemaVersion: SITE_DATA_SCHEMA_VERSION,
         updatedAt: now
       }
-    });
+    }, { preflight: true });
     return normalized;
   }
 
@@ -529,7 +591,7 @@
 
   async function writeSiteBackupsUnlocked(backups) {
     const normalized = normalizeSiteBackups(backups);
-    await chromeStorageSet({ [SITE_BACKUPS_KEY]: normalized });
+    await chromeStorageSet({ [SITE_BACKUPS_KEY]: normalized }, { preflight: true });
     return normalized;
   }
 
@@ -826,6 +888,7 @@
   root.BALANCE_REFRESH_ATTEMPTS_KEY = BALANCE_REFRESH_ATTEMPTS_KEY;
   root.SITE_DATA_META_KEY = SITE_DATA_META_KEY;
   root.SITE_DATA_SCHEMA_VERSION = SITE_DATA_SCHEMA_VERSION;
+  root.assertStorageCapacityForSet = assertStorageCapacityForSet;
   root.SITE_DATA_MIGRATIONS = SITE_DATA_MIGRATIONS;
   root.loadPrefs = loadPrefs;
   root.savePrefs = savePrefs;
@@ -876,6 +939,7 @@
       BALANCE_REFRESH_ATTEMPTS_KEY,
       SITE_DATA_META_KEY,
       SITE_DATA_SCHEMA_VERSION,
+      assertStorageCapacityForSet,
       SITE_DATA_MIGRATIONS,
       loadPrefs,
       savePrefs,

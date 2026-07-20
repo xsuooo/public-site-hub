@@ -163,8 +163,8 @@ test('diagnostics exposes orphaned permission cleanup and an all-clear state', (
 test('copied diagnostics are allowlisted and exclude site or credential material', () => {
   const buildRedactedDiagnostics = eval(`(${extractFunction(js, 'buildRedactedDiagnostics')})`);
   const report = buildRedactedDiagnostics({
-    extensionVersion: '1.0.0-rc.2',
-    manifestVersion: '0.99.0.2',
+    extensionVersion: '1.0.0-rc.3',
+    manifestVersion: '0.99.0.3',
     schemaVersion: 4,
     siteCount: 3,
     authorizedSiteCount: 2,
@@ -184,7 +184,7 @@ test('copied diagnostics are allowlisted and exclude site or credential material
     cookie: 'secret-cookie'
   }, 'Mozilla/5.0 Chrome/150.0.0.0 Edg/150.0.0.0');
 
-  assert.match(report, /1\.0\.0-rc\.2/);
+  assert.match(report, /1\.0\.0-rc\.3/);
   assert.match(report, /Edge 150\.0\.0\.0/);
   assert.match(report, /schema：v4/);
   assert.match(report, /已授权 2 · 未授权 1/);

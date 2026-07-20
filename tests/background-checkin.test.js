@@ -29,9 +29,10 @@ function loadBackground(overrides = {}) {
     importScripts(...files) {
       imported.push(...files);
       for (const file of files) {
-        // 单元测试只实装权限模块，其余仍靠 globals / 背景脚本自身
+        // 单元测试只实装消息契约和权限相关模块，其余仍靠 globals / 背景脚本自身
         if (
-          file === 'site-utils.js'
+          file === 'message-contract.js'
+          || file === 'site-utils.js'
           || file === 'permissions.js'
           || file === 'site-tabs.js'
           || file === 'balance-refresh.js'
@@ -64,6 +65,7 @@ function loadBackground(overrides = {}) {
         onClicked: { addListener(listener) { contextMenuClickListener = listener; } }
       },
       runtime: {
+        id: overrides.runtimeId,
         onInstalled: { addListener(listener) { lifecycle.installed.push(listener); } },
         onStartup: { addListener(listener) { lifecycle.startup.push(listener); } },
         onMessage: {
@@ -85,10 +87,10 @@ function loadBackground(overrides = {}) {
   vm.createContext(context);
   vm.runInContext(backgroundSource, context, { filename: 'background.js' });
 
-  async function dispatch(message) {
+  async function dispatch(message, sender = {}) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('message response timed out')), 1000);
-      const keepAlive = messageListener(message, {}, (response) => {
+      const keepAlive = messageListener(message, sender, (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
@@ -109,7 +111,25 @@ function loadBackground(overrides = {}) {
   };
 }
 
-test('loads checkin modules but check-in messages are hard-offline standalone', async () => {
+test('background rejects unknown messages and senders outside this extension', async () => {
+  const app = loadBackground({ runtimeId: 'extension-id' });
+
+  const unknown = await app.dispatch({ type: 'not-a-real-message' }, { id: 'extension-id' });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, 'unknown_message');
+  assert.equal(app.retained.at(-1), false);
+
+  const untrusted = await app.dispatch({ type: 'listSites' }, { id: 'other-extension' });
+  assert.equal(untrusted.ok, false);
+  assert.equal(untrusted.code, 'untrusted_sender');
+  assert.equal(app.retained.at(-1), false);
+
+  const trusted = await app.dispatch({ type: 'listSites' }, { id: 'extension-id' });
+  assert.equal(trusted.ok, true);
+  assert.equal(app.retained.at(-1), true);
+});
+
+test('check-in messages remain hard-offline and do not load retired modules', async () => {
   const plain = (value) => JSON.parse(JSON.stringify(value));
   const app = loadBackground();
 
@@ -336,6 +356,29 @@ test('background routes the explicit automatic Key action through the provision 
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'site-1');
   assert.equal(calls[0][1]?.allowCreate, true);
+});
+
+test('automatic token-page recovery opens a background tab without changing the active tab', async () => {
+  const created = [];
+  const app = loadBackground({
+    sites: [{ id: 'site-1', domain: 'tokens.example.com', type: 'newapi' }],
+    tabs: {
+      query: async () => [],
+      async create(options) {
+        created.push(options);
+        return { id: 41, ...options };
+      },
+      remove: async () => undefined
+    }
+  });
+
+  const background = await app.dispatch({ type: 'openTokenPage', id: 'site-1', background: true });
+  assert.equal(background.ok, true);
+  assert.equal(created[0].active, false);
+
+  const foreground = await app.dispatch({ type: 'openTokenPage', id: 'site-1' });
+  assert.equal(foreground.ok, true);
+  assert.equal(Object.hasOwn(created[1], 'active'), false);
 });
 
 test('redetectSite checks existing host access without requesting from the worker', async () => {
@@ -1489,7 +1532,13 @@ test('detectAndSave leaves legacy check-in data untouched without invoking the o
   });
   context.importScripts = (...files) => {
     for (const file of files) {
-      if (file === 'site-utils.js' || file === 'storage.js' || file === 'permissions.js' || file === 'site-tabs.js') {
+      if (
+        file === 'message-contract.js'
+        || file === 'site-utils.js'
+        || file === 'storage.js'
+        || file === 'permissions.js'
+        || file === 'site-tabs.js'
+      ) {
         const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
         vm.runInContext(source, context, { filename: file });
       }
@@ -1537,8 +1586,8 @@ test('real script loading no longer boots checkin-sync; status is standalone', a
   let listener;
   let context;
   const realScripts = new Set([
-    'site-utils.js', 'permissions.js', 'site-tabs.js', 'balance-format.js', 'page-scrape.js', 'tab-api-key.js',
-    'balance.js', 'storage.js', 'detect.js', 'balance-refresh.js', 'bridge.js', 'key-provision.js', 'key-import.js'
+    'message-contract.js', 'site-utils.js', 'permissions.js', 'site-tabs.js', 'balance-format.js', 'page-scrape.js', 'tab-api-key.js',
+    'balance.js', 'storage.js', 'detect.js', 'balance-refresh.js', 'key-provision.js', 'key-import.js'
   ]);
   const chrome = {
     storage: {
@@ -1582,7 +1631,7 @@ test('real script loading no longer boots checkin-sync; status is standalone', a
   assert.equal(imported.includes('checkin-sync.js'), false);
   assert.equal(typeof context.handleCheckinAction, 'undefined');
   const realOrder = [
-    'site-utils.js', 'permissions.js', 'site-tabs.js', 'balance-format.js', 'page-scrape.js', 'tab-api-key.js',
+    'message-contract.js', 'site-utils.js', 'permissions.js', 'site-tabs.js', 'balance-format.js', 'page-scrape.js', 'tab-api-key.js',
     'balance.js', 'storage.js', 'detect.js', 'balance-refresh.js', 'key-provision.js', 'key-import.js'
   ].map((file) => imported.indexOf(file));
   assert.equal(realOrder.every((index) => index >= 0), true);

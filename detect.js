@@ -126,7 +126,7 @@
       const response = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json', ...headers },
-        credentials: 'include',
+        credentials: 'omit',
         redirect: 'error',
         signal: controller?.signal
       });
@@ -143,26 +143,12 @@
     }
   }
 
-  async function cookieHeaderForDomain(domain) {
-    if (typeof chrome === 'undefined' || !chrome.cookies?.getAll) return '';
-    try {
-      let list = await chrome.cookies.getAll({ domain });
-      if (!list?.length) list = await chrome.cookies.getAll({ url: `https://${domain}` });
-      if (!list?.length) return '';
-      return list.map((c) => `${c.name}=${c.value}`).join('; ');
-    } catch (e) {
-      return '';
-    }
-  }
-
   async function probeSiteEndpoints(targetOrigin, options = {}) {
     const origin = root.originFromDomain?.(targetOrigin) || '';
     const domain = root.normalizeDomain?.(targetOrigin) || '';
     if (!origin || !domain) {
       return { type: null, name: null, signals: [], confidence: 'low', rawStatus: null };
     }
-    const cookie = options.cookieHeader || await cookieHeaderForDomain(domain);
-    const headers = cookie ? { Cookie: cookie } : {};
     const signals = [];
     let type = null;
     let name = null;
@@ -170,7 +156,7 @@
     let confidence = 'low';
 
     {
-      const r = await fetchJsonQuiet(`${origin}/api/public/site-info`, headers, options.timeoutMs);
+      const r = await fetchJsonQuiet(`${origin}/api/public/site-info`, {}, options.timeoutMs);
       const payload = r.data?.data || r.data;
       if (r.ok && isZenApiSiteInfo(payload)) {
         type = 'zenapi';
@@ -182,7 +168,7 @@
     }
 
     if (!type || type === 'newapi') {
-      const r = await fetchJsonQuiet(`${origin}/api/status`, headers, options.timeoutMs);
+      const r = await fetchJsonQuiet(`${origin}/api/status`, {}, options.timeoutMs);
       const status = r.data?.data || r.data;
       if (r.ok && isNewApiStatus(status)) {
         if (!type) type = 'newapi';
@@ -197,7 +183,7 @@
 
     // NewAPI 关闭 /api/status 公开访问时的回退
     if (!type) {
-      const r = await fetchJsonQuiet(`${origin}/api/about`, headers, options.timeoutMs);
+      const r = await fetchJsonQuiet(`${origin}/api/about`, {}, options.timeoutMs);
       const payload = r.data?.data || r.data;
       if (r.ok && isNewApiStatus(payload)) {
         type = 'newapi';
@@ -211,7 +197,7 @@
     if (!type) {
       const candidates = [`${origin}/api/v1/settings`, `${origin}/api/v1/system`, `${origin}/api/v1/user`];
       for (const url of candidates) {
-        const r = await fetchJsonQuiet(url, headers, options.timeoutMs);
+        const r = await fetchJsonQuiet(url, {}, options.timeoutMs);
         if (r.status === 401 || r.status === 403) {
           type = 'sub2api';
           signals.push(`${url} → ${r.status}`);
@@ -231,7 +217,7 @@
     }
 
     if (!type) {
-      const r = await fetchJsonQuiet(`${origin}/v1/models`, headers, options.timeoutMs);
+      const r = await fetchJsonQuiet(`${origin}/v1/models`, {}, options.timeoutMs);
       if (r.ok || r.status === 401 || r.status === 403) {
         signals.push(`/v1/models → ${r.status}`);
         type = 'newapi';

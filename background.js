@@ -1,4 +1,4 @@
-/* global loadSites, saveSites, upsertSite, updateSiteById, removeSiteById, removeSitesByIds,
+/* global PublicSiteMessageContract, loadSites, saveSites, upsertSite, updateSiteById, removeSiteById, removeSitesByIds,
    addKeyToSite, removeKeyFromSite, setDefaultKey, importSites, replaceSitesWithBackup, siteFromTab, normalizeSite,
    fetchSiteBalance, buildExportConfig, buildCheckinExportConfig, parseImportText,
    detectSite, applyDetectionToSite,
@@ -17,6 +17,7 @@
    scrapeBalanceWithRetry, tryAutoImportKeys, mergeScrapedKeys, ensureSiteKey */
 
 importScripts(
+  'message-contract.js',
   'site-utils.js',
   'permissions.js',
   'site-tabs.js',
@@ -552,17 +553,25 @@ if (chrome.contextMenus?.onClicked) {
         hintName: tab?.title
         // category 走默认偏好（设置里「添加分类」）
       });
-      if (res.ok) {
-        console.log('[公益站收藏] 已添加', res.site?.domain, res.detection?.summary);
-      } else {
+      if (!res.ok) {
         console.warn('[公益站收藏] context_menu_add_failed', res.code || 'unknown');
       }
     })().catch(() => console.warn('[公益站收藏] context_menu_add_failed', 'unexpected'));
   });
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  const type = message?.type;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const senderValidation = PublicSiteMessageContract.validateRuntimeSender(sender, chrome.runtime?.id);
+  if (!senderValidation.ok) {
+    sendResponse(senderValidation);
+    return false;
+  }
+  const messageValidation = PublicSiteMessageContract.validateRuntimeMessage(message);
+  if (!messageValidation.ok) {
+    sendResponse(messageValidation);
+    return false;
+  }
+  const type = messageValidation.type;
   (async () => {
     await startupReady;
     switch (type) {
@@ -964,7 +973,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const url = typeof tokenPageUrlForSite === 'function'
           ? tokenPageUrlForSite(s)
           : `https://${s.domain}/console/token`;
-        await chrome.tabs.create({ url });
+        await chrome.tabs.create({ url, ...(message.background === true ? { active: false } : {}) });
         return { ok: true, url };
       }
       case 'pushToCheckin':

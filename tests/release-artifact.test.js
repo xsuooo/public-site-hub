@@ -22,7 +22,7 @@ function temporaryDirectory(t, prefix) {
 }
 
 const provenance = Object.freeze({
-  tag: 'v1.0.0-rc.2',
+  tag: 'v1.0.0-rc.3',
   commit: '1'.repeat(40),
   tree: '2'.repeat(40)
 });
@@ -30,10 +30,10 @@ const provenance = Object.freeze({
 test('release identity keeps user and Chrome versions separate', () => {
   assert.deepEqual(validateReleaseIdentity(packageJson, manifest), {
     packageName: 'public-site-hub',
-    packageVersion: '1.0.0-rc.2',
-    manifestVersion: '0.99.0.2',
-    tag: 'v1.0.0-rc.2',
-    baseName: 'public-site-hub-1.0.0-rc.2'
+    packageVersion: '1.0.0-rc.3',
+    manifestVersion: '0.99.0.3',
+    tag: 'v1.0.0-rc.3',
+    baseName: 'public-site-hub-1.0.0-rc.3'
   });
   assert.equal(FIXED_DOS_TIME, 0);
   assert.equal(FIXED_DOS_DATE, 0x0021);
@@ -113,7 +113,7 @@ test('release artifact provenance must match the versioned tag', (t) => {
       manifest,
       provenance: { ...provenance, tag: 'v1.0.0-rc.1' }
     }),
-    /provenance tag must be v1\.0\.0-rc\.2/
+    /provenance tag must be v1\.0\.0-rc\.3/
   );
 });
 

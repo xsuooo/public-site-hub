@@ -141,7 +141,7 @@
         return {
           ok: false,
           code: 'login_tab_required',
-          error: '请先打开并登录该站的令牌页，再点「自动获取 Key」'
+          error: '需要登录该站的令牌页后再获取 Key'
         };
       }
 

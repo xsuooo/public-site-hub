@@ -42,6 +42,7 @@ test('popup loads layered local CSS and keeps only the site list scrollable', ()
   assert.match(css, /\.site-card-actions \.btn\s*\{[^}]*min-width:\s*0/s);
   assert.match(html, /id="saveCurrent"[^>]*>收藏当前页<\/button>/);
   assert.match(html, /id="refreshBalances"/);
+  assert.match(html, /id="grantAllSites"[^>]*title="一次授权全部已收藏站点"[^>]*hidden/);
 });
 
 test('popup typography uses the approved local font stacks without synthetic weights', () => {
@@ -99,6 +100,44 @@ test('popup exposes the approved direct actions and guards sensitive Key operati
   assert.doesNotMatch(js, /window\.confirm|\bconfirm\(/);
   assert.match(html, /<dialog[^>]+id="deleteDialog"/);
   assert.match(html, /<dialog[^>]+id="keyCreateDialog"/);
+});
+
+test('popup uses the site name as the only general open-site control', () => {
+  const renderSource = extractFunction(js, 'render');
+  assert.match(renderSource, /class="site-name-button"[^>]*data-act="open"/);
+  assert.doesNotMatch(renderSource, />打开站点<\/button>/);
+
+  const source = extractFunction(js, 'balanceErrorActionMeta');
+  const context = {};
+  vm.runInNewContext(`${source}; this.balanceErrorActionMeta = balanceErrorActionMeta`, context);
+  assert.equal(context.balanceErrorActionMeta({
+    balanceStatus: { status: 'failed', lastError: { code: 'parse_failed', action: 'open_site' } }
+  }), null);
+  assert.equal(context.balanceErrorActionMeta({
+    balanceStatus: { status: 'failed', lastError: { code: 'network_error' } }
+  }), null);
+});
+
+test('Get Key opens the token page automatically when page work is required', async () => {
+  const source = `async ${extractFunction(js, 'handleKeyProvisionFailure')}`;
+  const calls = [];
+  const notices = [];
+  const context = {
+    send: async (type, payload) => {
+      calls.push([type, payload]);
+      return { ok: true };
+    },
+    toast: (...args) => notices.push(args),
+    resolveErrorAction: () => ({ label: 'fallback' })
+  };
+  vm.runInNewContext(`${source}; this.handleKeyProvisionFailure = handleKeyProvisionFailure`, context);
+
+  await context.handleKeyProvisionFailure(
+    { ok: false, code: 'login_tab_required' },
+    { id: 'site-1' }
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['openTokenPage', { id: 'site-1', background: true }]]);
+  assert.match(notices[0][0], /已打开令牌页/);
 });
 
 test('popup menus expose accessible state and Escape focus restoration', () => {
@@ -224,6 +263,17 @@ test('popup continues bulk refresh after permission denial but blocks single-sit
   const retryStart = js.indexOf("popupRetryFailed.addEventListener('click'");
   const retrySend = js.indexOf("runQuickBalanceAction('retryFailedBalances'", retryStart);
   assert.match(js.slice(retryStart, retrySend), /continueOnDenied:\s*true/);
+});
+
+test('popup can grant every saved site in one explicit user action', () => {
+  const start = js.indexOf("$('grantAllSites')?.addEventListener('click'");
+  const end = js.indexOf('async function runQuickBalanceAction', start);
+  assert.notEqual(start, -1, 'grant-all click handler should exist');
+  assert.notEqual(end, -1, 'grant-all click handler should be scoped');
+  const source = js.slice(start, end);
+  assert.match(source, /requestSiteAccessFromGesture\(state\.sites\)/);
+  assert.match(source, /access\.origins\.length/);
+  assert.match(source, /后续操作不再逐站询问/);
 });
 
 test('manage click events cannot become edit ids and edit links use the new route', () => {

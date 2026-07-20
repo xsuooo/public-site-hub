@@ -81,6 +81,59 @@ test('backup management can list and clear local recovery snapshots', async () =
   assert.deepEqual(await storage.listSiteBackups(), []);
 });
 
+test('site writes fail atomically with a stable code before exceeding storage quota', async () => {
+  const originalGetBytesInUse = chrome.storage.local.getBytesInUse;
+  const originalQuota = chrome.storage.local.QUOTA_BYTES;
+  const before = [utils.normalizeSite({ id: 'quota-before', domain: 'before-quota.example.com' })];
+  memory.sites = before;
+  memory.siteDataMeta = { schemaVersion: storage.SITE_DATA_SCHEMA_VERSION, updatedAt: 1 };
+  chrome.storage.local.QUOTA_BYTES = 1000;
+  chrome.storage.local.getBytesInUse = (keys, callback) => {
+    callback(keys == null ? 900 : 50);
+  };
+
+  try {
+    await assert.rejects(
+      storage.saveSites([{
+        id: 'quota-after',
+        domain: 'after-quota.example.com',
+        note: 'x'.repeat(400)
+      }]),
+      (error) => error?.code === 'storage_quota_exceeded'
+    );
+    assert.deepEqual(memory.sites, before);
+    assert.equal(memory.siteDataMeta.updatedAt, 1);
+  } finally {
+    if (originalGetBytesInUse === undefined) delete chrome.storage.local.getBytesInUse;
+    else chrome.storage.local.getBytesInUse = originalGetBytesInUse;
+    if (originalQuota === undefined) delete chrome.storage.local.QUOTA_BYTES;
+    else chrome.storage.local.QUOTA_BYTES = originalQuota;
+  }
+});
+
+test('browser quota failures are normalized to the stable storage error code', async () => {
+  const originalSet = chrome.storage.local.set;
+  const originalGetBytesInUse = chrome.storage.local.getBytesInUse;
+  delete chrome.storage.local.getBytesInUse;
+  chrome.storage.local.set = (_patch, callback) => {
+    chrome.runtime.lastError = { message: 'QUOTA_BYTES quota exceeded' };
+    callback();
+    delete chrome.runtime.lastError;
+  };
+
+  try {
+    await assert.rejects(
+      storage.saveSites([{ domain: 'quota-runtime.example.com' }]),
+      (error) => error?.code === 'storage_quota_exceeded'
+        && !/QUOTA_BYTES/.test(error.message)
+    );
+  } finally {
+    chrome.storage.local.set = originalSet;
+    if (originalGetBytesInUse === undefined) delete chrome.storage.local.getBytesInUse;
+    else chrome.storage.local.getBytesInUse = originalGetBytesInUse;
+  }
+});
+
 test('empty import is rejected before it can replace stored sites', async () => {
   await assert.rejects(
     storage.importSites([], { mode: 'replace' }),

@@ -1,11 +1,12 @@
 {
   "name": "public-site-hub",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "private": true,
   "description": "Lightweight hub for public API sites: auto-detect, keys, search, balance",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
+    "verify:syntax": "node scripts/check-js.js",
     "build": "node scripts/build-extension.js",
     "verify:package": "node scripts/verify-package.js",
     "verify:runtime": "node scripts/smoke-extension.js",
