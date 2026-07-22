@@ -314,11 +314,14 @@
     const rawType = String(site.type || 'auto').trim().toLowerCase();
     const type = ['auto', 'newapi', 'sub2api', 'zenapi'].includes(rawType) ? rawType : 'auto';
     const rawPageUrl = String(site.pageUrl || '').trim();
+    // 回退也必须剥离 query/hash，避免临时令牌进入指纹与完整导出。
+    const safePageUrl = normalizeHttpsUrl(rawPageUrl, origin || domain)
+      || (rawPageUrl ? rawPageUrl.split(/[?#]/, 1)[0] : '');
     return JSON.stringify([
       origin || domain,
       truncateText(site.name, 60),
       type,
-      normalizeHttpsUrl(rawPageUrl, origin || domain) || rawPageUrl,
+      safePageUrl,
       normalizeCategory(site.category)
     ]);
   }

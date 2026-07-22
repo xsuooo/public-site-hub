@@ -7,6 +7,7 @@ const {
   MESSAGE_TYPES,
   MAX_ID_LENGTH,
   MAX_TEXT_BYTES,
+  MAX_KEY_BYTES,
   MAX_SITE_IDS,
   validateRuntimeMessage,
   validateRuntimeSender
@@ -124,6 +125,29 @@ test('message contract limits UTF-8 text and import configuration to 2 MB', () =
   }).code, 'message_too_large');
   assert.equal(validateRuntimeMessage({
     type: 'detectSite', input: oversized
+  }).code, 'message_too_large');
+});
+
+test('message contract bounds addKey payloads', () => {
+  assert.equal(validateRuntimeMessage({
+    type: 'addKey',
+    siteId: 'site-1',
+    key: 'sk-normal-complete-key-value'
+  }).ok, true);
+  assert.equal(validateRuntimeMessage({
+    type: 'addKey',
+    siteId: 'site-1',
+    key: { name: '令牌', key: 'sk-object-complete-key-value' }
+  }).ok, true);
+  assert.equal(validateRuntimeMessage({
+    type: 'addKey',
+    siteId: 'site-1',
+    key: 'x'.repeat(MAX_KEY_BYTES + 1)
+  }).code, 'message_too_large');
+  assert.equal(validateRuntimeMessage({
+    type: 'addKey',
+    siteId: 'site-1',
+    key: { name: 'n', key: 'x'.repeat(MAX_KEY_BYTES) }
   }).code, 'message_too_large');
 });
 

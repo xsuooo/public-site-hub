@@ -39,6 +39,7 @@
   function tokenStateError(state) {
     const messages = {
       'with-tokens': '站点已有 Key，但未能读取完整值；请在令牌页复制后手动添加',
+      'unknown-empty': '无法确认站点 Key 列表是否为空；请打开令牌页确认后再试',
       unavailable: '无法确认站点的 Key 列表；请先登录令牌页后重试',
       unsupported: '该站暂不支持自动创建 Key，可打开令牌页手动创建'
     };

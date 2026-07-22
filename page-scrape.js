@@ -325,26 +325,57 @@
             return n;
           }
 
+          // 与 tab-api-key.pickList 对齐：分页 total 优先；空页但 total>0 视为 with-tokens。
           function inspectTokenList(payload) {
             if (!payload || typeof payload !== 'object' || payload.success === false) {
-              return { known: false, items: [] };
+              return { known: false, items: [], state: 'unavailable', total: null };
             }
-            if (Array.isArray(payload)) return { known: true, items: payload };
-            const d = payload.data;
-            if (Array.isArray(d)) return { known: true, items: d };
-            if (d && typeof d === 'object') {
-              if (Array.isArray(d.items)) return { known: true, items: d.items };
-              if (Array.isArray(d.records)) return { known: true, items: d.records };
-              if (Array.isArray(d.list)) return { known: true, items: d.list };
-              if (Array.isArray(d.tokens)) return { known: true, items: d.tokens };
-              if (Array.isArray(d.data)) return { known: true, items: d.data };
-              // 有的把 map 包一层
-              if (Array.isArray(d.rows)) return { known: true, items: d.rows };
+            if (Array.isArray(payload)) {
+              return {
+                known: true,
+                items: payload,
+                state: payload.length ? 'with-tokens' : 'empty',
+                total: payload.length
+              };
             }
-            if (Array.isArray(payload.items)) return { known: true, items: payload.items };
-            if (Array.isArray(payload.tokens)) return { known: true, items: payload.tokens };
-            if (Array.isArray(payload.records)) return { known: true, items: payload.records };
-            return { known: false, items: [] };
+
+            let items = null;
+            let total = null;
+            const data = payload.data;
+            if (Array.isArray(data)) {
+              items = data;
+              total = data.length;
+            } else if (data && typeof data === 'object') {
+              for (const field of ['items', 'records', 'list', 'tokens', 'data', 'rows']) {
+                if (Array.isArray(data[field])) {
+                  items = data[field];
+                  total = data.total ?? data.total_count ?? data.count ?? data.totalCount ?? null;
+                  break;
+                }
+              }
+            }
+            if (!items) {
+              for (const field of ['items', 'records', 'list', 'tokens', 'rows']) {
+                if (Array.isArray(payload[field])) {
+                  items = payload[field];
+                  total = payload.total ?? payload.total_count ?? payload.count ?? payload.totalCount ?? null;
+                  break;
+                }
+              }
+            }
+            if (!items) return { known: false, items: [], state: 'unavailable', total: null };
+
+            const numericTotal = Number(total);
+            const hasTotal = total !== null && total !== undefined && total !== ''
+              && Number.isFinite(numericTotal) && numericTotal >= 0;
+            return {
+              known: true,
+              items,
+              total: hasTotal ? numericTotal : null,
+              state: hasTotal
+                ? (numericTotal === 0 ? 'empty' : 'with-tokens')
+                : (items.length ? 'with-tokens' : 'unknown-empty')
+            };
           }
 
           function isCompleteKeyValue(value) {
@@ -420,7 +451,8 @@
                 const inspected = inspectTokenList(data);
                 if (!inspected.known) continue;
                 const list = inspected.items;
-                tokenListState = list.length ? 'with-tokens' : 'empty';
+                // state 已 total 感知：首页空但 total>0 → with-tokens，避免误导创建。
+                tokenListState = inspected.state || (list.length ? 'with-tokens' : 'empty');
                 tokenListPath = tp;
                 if (!list.length) break;
                 for (const item of list) {

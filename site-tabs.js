@@ -120,23 +120,42 @@
     }
   }
 
+  function trackOwnedTempTab(ownedTempTabs, tabId) {
+    if (!tabId || !Array.isArray(ownedTempTabs)) return;
+    if (!ownedTempTabs.includes(tabId)) ownedTempTabs.push(tabId);
+  }
+
+  function untrackOwnedTempTab(ownedTempTabs, tabId) {
+    if (!tabId || !Array.isArray(ownedTempTabs)) return;
+    const index = ownedTempTabs.indexOf(tabId);
+    if (index >= 0) ownedTempTabs.splice(index, 1);
+  }
+
   /**
    * 打开「临时后台标签」读余额用。
    * 重要：绝不 chrome.tabs.update 用户已打开的标签。
+   * 创建成功后立刻登记到 ownedTempTabs，避免超时竞态导致标签泄漏。
    */
-  async function openTemporaryBalanceTab(site, urls) {
-    const domain = domainOf(site?.domain || site);
+  async function openTemporaryBalanceTab(site, urls, ownedTempTabs = null) {
     const list = Array.isArray(urls) && urls.length
       ? urls
       : personalUrls(site);
     for (const url of list) {
+      let createdId = null;
       try {
         const created = await chrome.tabs.create({ url, active: false });
         if (!created?.id) continue;
-        await waitTabComplete(created.id, 12000);
+        createdId = created.id;
+        // 在 waitTabComplete 之前登记，保证超时 finally 能关掉这张页。
+        trackOwnedTempTab(ownedTempTabs, createdId);
+        await waitTabComplete(createdId, 12000);
         await new Promise((r) => setTimeout(r, 1600));
-        return { tabId: created.id, temporary: true, url };
+        return { tabId: createdId, temporary: true, url };
       } catch (e) {
+        if (createdId) {
+          untrackOwnedTempTab(ownedTempTabs, createdId);
+          await closeTabSafe(createdId);
+        }
         // 试下一个 URL
       }
     }
@@ -148,7 +167,12 @@
    * - 已有同域标签：直接复用，不改 URL
    * - 没有：后台静默开临时页（用完由调用方关闭）
    */
-  async function ensureSiteTab(site, { preferPersonal = true, tabId, expectedOrigin } = {}) {
+  async function ensureSiteTab(site, {
+    preferPersonal = true,
+    tabId,
+    expectedOrigin,
+    ownedTempTabs = null
+  } = {}) {
     const domain = domainOf(site?.domain || site?.baseUrl);
     const siteOrigin = expectedOrigin
       || (typeof root.originFromDomain === 'function'
@@ -168,7 +192,7 @@
     const urls = preferPersonal
       ? [`${base}/console/personal`, `${base}/console/topup`, `${base}/panel/personal`, `${base}/user`, `${base}/`]
       : [`${base}/`, `${base}/console/personal`, `${base}/console/topup`, `${base}/panel/personal`, `${base}/user`];
-    return openTemporaryBalanceTab(site, urls);
+    return openTemporaryBalanceTab(site, urls, ownedTempTabs);
   }
 
   async function closeTabSafe(tabId) {

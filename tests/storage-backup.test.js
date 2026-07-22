@@ -134,6 +134,56 @@ test('browser quota failures are normalized to the stable storage error code', a
   }
 });
 
+
+test('schema migration fails closed with preflight and does not keep the migration backup', async () => {
+  const originalGetBytesInUse = chrome.storage.local.getBytesInUse;
+  const originalQuota = chrome.storage.local.QUOTA_BYTES;
+  // 旧 schema，触发迁移路径（当前 SITE_DATA_SCHEMA_VERSION=5）。
+  memory.sites = [{
+    id: 'migrate-1',
+    domain: 'migrate.example.com',
+    baseUrl: 'https://migrate.example.com',
+    pageUrl: 'https://migrate.example.com/',
+    name: 'migrate',
+    type: 'auto',
+    category: 'gongyi',
+    keys: [],
+    tags: [],
+    createdAt: 1,
+    updatedAt: 1
+  }];
+  memory.siteDataMeta = { schemaVersion: 1, updatedAt: 1 };
+  memory.siteBackups = [];
+  chrome.storage.local.QUOTA_BYTES = 800;
+  // 总量已接近上限；任意带 sites 的写入都会被 preflight 拒绝。
+  chrome.storage.local.getBytesInUse = (keys, callback) => {
+    if (keys == null) {
+      callback(780);
+      return;
+    }
+    const list = Array.isArray(keys) ? keys : [keys];
+    // 已有站点约占大部分空间；替换/备份写入都会超安全阈值。
+    callback(list.includes('sites') ? 700 : 10);
+  };
+
+  try {
+    await assert.rejects(
+      storage.migrateSiteData(),
+      (error) => error?.code === 'storage_quota_exceeded'
+    );
+    // 迁移未完成：schema 仍为旧值，站点未被改写。
+    assert.equal(memory.siteDataMeta.schemaVersion, 1);
+    assert.equal(memory.sites[0].domain, 'migrate.example.com');
+    // 迁移备份在写入失败后必须回滚，避免配额雪球。
+    assert.equal(Array.isArray(memory.siteBackups) ? memory.siteBackups.length : 0, 0);
+  } finally {
+    if (originalGetBytesInUse === undefined) delete chrome.storage.local.getBytesInUse;
+    else chrome.storage.local.getBytesInUse = originalGetBytesInUse;
+    if (originalQuota === undefined) delete chrome.storage.local.QUOTA_BYTES;
+    else chrome.storage.local.QUOTA_BYTES = originalQuota;
+  }
+});
+
 test('empty import is rejected before it can replace stored sites', async () => {
   await assert.rejects(
     storage.importSites([], { mode: 'replace' }),

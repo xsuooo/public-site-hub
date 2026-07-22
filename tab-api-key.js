@@ -12,17 +12,17 @@
     if (!String(expectedOrigin || '').trim()) {
       return { ok: false, code: 'expected_origin_required', error: '缺少站点 Origin，已拒绝读取账号会话' };
     }
+    // null/undefined 不能经 String() 变成 "null"/"undefined"，否则会绕过空身份守卫。
+    // 身份校验先于 tab 可用性，避免缺 tab 时误报 no_tab 掩盖账号问题。
+    const rawUserId = session && typeof session === 'object' ? session.userId : session;
+    const expected = rawUserId == null ? '' : String(rawUserId).trim();
+    const rawToken = session && typeof session === 'object' ? session.token : '';
+    const suppliedToken = rawToken == null ? '' : String(rawToken).trim();
+    if (!expected || expected === 'null' || expected === 'undefined') {
+      return { ok: false, code: 'account_identity_unavailable', error: '无法确认当前登录账号，未执行自动获取 Key' };
+    }
     if (!tabId || typeof chrome === 'undefined' || !chrome.scripting?.executeScript) {
       return { ok: false, code: 'no_tab', error: '请先打开并登录该站的令牌页' };
-    }
-    const expected = String(
-      session && typeof session === 'object' ? session.userId : session
-    ).trim();
-    const suppliedToken = String(
-      session && typeof session === 'object' ? session.token : ''
-    ).trim();
-    if (!expected) {
-      return { ok: false, code: 'account_identity_unavailable', error: '无法确认当前登录账号，未执行自动获取 Key' };
     }
     try {
       const results = await chrome.scripting.executeScript({

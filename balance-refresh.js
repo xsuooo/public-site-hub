@@ -172,6 +172,8 @@ async function scrapeBalanceWithRetry(tabId, type, rounds = 4, options = {}) {
 }
 const SITE_BALANCE_TIMEOUT_MS = 25000;
 const MAX_OWNED_TEMP_TABS = 2;
+// 临时页打开最长约 12s 加载 + 1.6s 稳定等待；超时竞态下延迟清理需覆盖该窗口。
+const OWNED_TEMP_TAB_SWEEP_MS = 15000;
 
 function balanceFailureMessage(error) {
   return String(error || '余额获取失败').replace(/\s+/g, ' ').trim().slice(0, 200) || '余额获取失败';
@@ -240,9 +242,9 @@ async function openOwnedTempTab(site, urls, ownedTempTabs) {
     const oldId = owned.shift();
     if (oldId) await closeTabSafe(oldId);
   }
-  const temp = await openTemporaryBalanceTab(site, urls);
-  if (temp?.tabId) owned.push(temp.tabId);
-  return temp;
+  // openTemporaryBalanceTab 在 tabs.create 成功后立刻登记到 owned，
+  // 这样 withTimeout 触发后 finally 仍能关掉慢加载标签。
+  return openTemporaryBalanceTab(site, urls, owned);
 }
 
 function recordBalanceSuccess(site, result) {
@@ -310,15 +312,13 @@ async function refreshSiteBalanceInternal(attempt, claimedSite = null) {
 
       const freshBeforeTab = await refreshCurrentSite();
       if (!freshBeforeTab.ok) return freshBeforeTab;
-      const ensured = await ensureSiteTab(site, { preferPersonal: false });
+      // ownedTempTabs 在 tabs.create 成功瞬间登记，避免超时后标签泄漏。
+      const ensured = await ensureSiteTab(site, {
+        preferPersonal: false,
+        ownedTempTabs
+      });
       tabId = ensured.tabId;
       temporaryTab = ensured.temporary;
-      if (temporaryTab && tabId) {
-        while (ownedTempTabs.length >= MAX_OWNED_TEMP_TABS) {
-          await closeTabSafe(ownedTempTabs.shift());
-        }
-        ownedTempTabs.push(tabId);
-      }
 
       if (!tabId) {
         return {
@@ -405,8 +405,8 @@ async function refreshSiteBalanceInternal(attempt, claimedSite = null) {
     result = { ok: false, code: classified.code, error: classified.message, action: classified.action };
   } finally {
     await closeOwnedTempTabs(ownedTempTabs);
-    // 超时竞态：内层可能在 finally 后才 push 临时 tab，延迟再清一次
-    setTimeout(() => { void closeOwnedTempTabs(ownedTempTabs); }, 2500);
+    // 超时竞态兜底：create→wait 可能跨过 hard timeout，延迟再清一次。
+    setTimeout(() => { void closeOwnedTempTabs(ownedTempTabs); }, OWNED_TEMP_TAB_SWEEP_MS);
   }
 
   if (!result?.ok) {
@@ -636,7 +636,6 @@ async function refreshBatchSiteBalanceInternal(attempt, claimedSite = null) {
   if (!checked.ok) return { id: attempt.siteId, ...checked };
   let site = checked.site;
   let detectionPatch = {};
-  let ensured = null;
   let balanceResult = null;
   const refreshCurrentSite = async () => {
     const current = await loadCurrentBalanceSite(attempt);
@@ -678,68 +677,78 @@ async function refreshBatchSiteBalanceInternal(attempt, claimedSite = null) {
     const initialSession = await readPageAuthSession(site.domain, siteOrigin(site));
     checked = await refreshCurrentSite();
     if (!checked.ok) return { id: attempt.siteId, ...checked };
-    ensured = await ensureSiteTab(site, { preferPersonal: false });
-    const tabId = ensured?.tabId;
-    const session = tabId
-      ? await readPageAuthSession(site.domain, siteOrigin(site), tabId)
-      : initialSession;
-    // 批量路径保留旧兼容行为：fetchSiteBalance 可在没有标签 ID 时使用
-    // page/session 或测试夹具完成请求；不要把“无标签”提前变成失败。
-    checked = await refreshCurrentSite();
-    if (!checked.ok) return { id: attempt.siteId, ...checked };
-    balanceResult = await withTimeout(
-      fetchSiteBalance(site, {
-        pageToken: session?.token,
-        newApiUserId: session?.userId,
-        tabId,
-        quotaPerUnit: site.quotaPerUnit,
-        expectedOrigin: attempt.expectedOrigin
-      }),
-      SITE_BALANCE_TIMEOUT_MS
-    );
-
-    if (!balanceResult?.ok) {
-      const classified = classifySiteBalanceError(balanceResult?.error, balanceResult?.code);
-      balanceResult = { ...balanceResult, ...classified, ok: false };
-    }
-    if (isBalanceAttemptAbort(balanceResult)) {
-      return { id: attempt.siteId, ...balanceResult };
-    }
-    let persisted;
+    // 批量路径也立刻登记临时标签，避免 withTimeout 与 tabs.create 竞态泄漏。
+    const batchOwnedTempTabs = [];
     try {
-      persisted = await persistBalanceResult(site, balanceResult, { attemptId: attempt.attemptId });
-    } catch (persistError) {
-      console.warn('[公益站收藏] 余额结果落库失败', balanceLogErrorCode(persistError));
+      const ensured = await ensureSiteTab(site, {
+        preferPersonal: false,
+        ownedTempTabs: batchOwnedTempTabs
+      });
+      const tabId = ensured?.tabId;
+      const session = tabId
+        ? await readPageAuthSession(site.domain, siteOrigin(site), tabId)
+        : initialSession;
+      // 批量路径保留旧兼容行为：fetchSiteBalance 可在没有标签 ID 时使用
+      // page/session 或测试夹具完成请求；不要把“无标签”提前变成失败。
+      checked = await refreshCurrentSite();
+      if (!checked.ok) return { id: attempt.siteId, ...checked };
+      balanceResult = await withTimeout(
+        fetchSiteBalance(site, {
+          pageToken: session?.token,
+          newApiUserId: session?.userId,
+          tabId,
+          quotaPerUnit: site.quotaPerUnit,
+          expectedOrigin: attempt.expectedOrigin
+        }),
+        SITE_BALANCE_TIMEOUT_MS
+      );
+
+      if (!balanceResult?.ok) {
+        const classified = classifySiteBalanceError(balanceResult?.error, balanceResult?.code);
+        balanceResult = { ...balanceResult, ...classified, ok: false };
+      }
+      if (isBalanceAttemptAbort(balanceResult)) {
+        return { id: attempt.siteId, ...balanceResult };
+      }
+      let persisted;
+      try {
+        persisted = await persistBalanceResult(site, balanceResult, { attemptId: attempt.attemptId });
+      } catch (persistError) {
+        console.warn('[公益站收藏] 余额结果落库失败', balanceLogErrorCode(persistError));
+        return {
+          id: attempt.siteId,
+          ok: false,
+          code: 'balance_persist_failed',
+          error: '余额结果保存失败'
+        };
+      }
+      if (!persisted) {
+        return {
+          id: attempt.siteId,
+          ...balanceAttemptFailure(
+            'site_changed_during_refresh',
+            '站点在刷新期间已删除或修改，未写入过期余额结果'
+          )
+        };
+      }
       return {
         id: attempt.siteId,
-        ok: false,
-        code: 'balance_persist_failed',
-        error: '余额结果保存失败'
+        ok: !!balanceResult.ok,
+        ...(balanceResult.ok ? {
+          balance: balanceResult.balance,
+          usage: balanceResult.usage,
+          via: balanceResult.via
+        } : {
+          code: balanceResult.code,
+          error: balanceResult.error,
+          action: balanceResult.action
+        }),
+        site: persisted
       };
+    } finally {
+      await closeOwnedTempTabs(batchOwnedTempTabs);
+      setTimeout(() => { void closeOwnedTempTabs(batchOwnedTempTabs); }, OWNED_TEMP_TAB_SWEEP_MS);
     }
-    if (!persisted) {
-      return {
-        id: attempt.siteId,
-        ...balanceAttemptFailure(
-          'site_changed_during_refresh',
-          '站点在刷新期间已删除或修改，未写入过期余额结果'
-        )
-      };
-    }
-    return {
-      id: attempt.siteId,
-      ok: !!balanceResult.ok,
-      ...(balanceResult.ok ? {
-        balance: balanceResult.balance,
-        usage: balanceResult.usage,
-        via: balanceResult.via
-      } : {
-        code: balanceResult.code,
-        error: balanceResult.error,
-        action: balanceResult.action
-      }),
-      site: persisted
-    };
   } catch (error) {
     if (error?.code === 'timeout') attempt.cancelled = true;
     const classified = classifySiteBalanceError(error?.message || error, error?.code || 'timeout');
@@ -766,8 +775,6 @@ async function refreshBatchSiteBalanceInternal(attempt, claimedSite = null) {
         error: '余额结果保存失败'
       };
     }
-  } finally {
-    if (ensured?.temporary && ensured.tabId) await closeTabSafe(ensured.tabId);
   }
 }
 

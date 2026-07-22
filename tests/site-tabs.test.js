@@ -94,3 +94,47 @@ test('openFailedBalanceSites reports empty when none failed', async () => {
   assert.equal(result.total, 0);
   assert.equal(created.length, 0);
 });
+
+test('openTemporaryBalanceTab registers the tab id before waitTabComplete finishes', async () => {
+  const previousCreate = globalThis.chrome.tabs.create;
+  const previousGet = globalThis.chrome.tabs.get;
+  const previousOnUpdated = globalThis.chrome.tabs.onUpdated;
+  const owned = [];
+  let resolveComplete;
+  const completeGate = new Promise((resolve) => { resolveComplete = resolve; });
+  let createResolved = false;
+
+  globalThis.chrome.tabs.create = async ({ url }) => {
+    createResolved = true;
+    return { id: 42, url };
+  };
+  globalThis.chrome.tabs.get = async () => {
+    await completeGate;
+    return { status: 'complete' };
+  };
+  globalThis.chrome.tabs.onUpdated = {
+    addListener() {},
+    removeListener() {}
+  };
+
+  try {
+    const openPromise = siteTabs.openTemporaryBalanceTab(
+      { domain: 'slow.example.com', baseUrl: 'https://slow.example.com' },
+      ['https://slow.example.com/'],
+      owned
+    );
+    // create 返回后、wait 完成前，owned 必须已登记。
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(createResolved, true);
+    assert.deepEqual(owned, [42]);
+    resolveComplete();
+    const result = await openPromise;
+    assert.equal(result.tabId, 42);
+    assert.equal(result.temporary, true);
+    assert.deepEqual(owned, [42]);
+  } finally {
+    globalThis.chrome.tabs.create = previousCreate;
+    globalThis.chrome.tabs.get = previousGet;
+    globalThis.chrome.tabs.onUpdated = previousOnUpdated;
+  }
+});

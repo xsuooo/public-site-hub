@@ -222,3 +222,17 @@ test('filterSitesByHealth returns a copy or matching health level', () => {
   assert.deepEqual(unknown, sites);
   assert.notEqual(unknown, sites);
 });
+
+test('checkinFingerprint strips query and hash even on normalize fallback', () => {
+  const fingerprint = utils.checkinFingerprint({
+    domain: 'other.example.com',
+    name: 'other',
+    type: 'auto',
+    category: 'gongyi',
+    // pageUrl host 与 domain 不一致时 normalizeHttpsUrl 返回 null，走回退分支。
+    pageUrl: 'https://leak.example.com/path?token=secret#frag'
+  });
+  assert.doesNotMatch(fingerprint, /token=secret/);
+  assert.doesNotMatch(fingerprint, /#frag/);
+  assert.match(fingerprint, /https:\/\/leak\.example\.com\/path/);
+});

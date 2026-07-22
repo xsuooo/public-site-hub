@@ -3,6 +3,7 @@
   const MAX_RUN_ID_LENGTH = 80;
   const MAX_URL_LENGTH = 4096;
   const MAX_TEXT_BYTES = 2 * 1024 * 1024;
+  const MAX_KEY_BYTES = 8 * 1024;
   const MAX_SITE_IDS = 1000;
 
   const MESSAGE_TYPES = Object.freeze([
@@ -157,8 +158,21 @@
     if (type === 'updateSite' && !isRecord(message.patch)) {
       return failure('invalid_message', '站点更新格式无效');
     }
-    if (type === 'addKey' && typeof message.key !== 'string' && !isRecord(message.key)) {
-      return failure('invalid_message', 'Key 数据格式无效');
+    if (type === 'addKey') {
+      if (typeof message.key !== 'string' && !isRecord(message.key)) {
+        return failure('invalid_message', 'Key 数据格式无效');
+      }
+      let keyPayload = '';
+      try {
+        keyPayload = typeof message.key === 'string'
+          ? message.key
+          : JSON.stringify(message.key);
+      } catch (error) {
+        return failure('invalid_message', 'Key 数据格式无效');
+      }
+      if (utf8ByteLength(keyPayload) > MAX_KEY_BYTES) {
+        return failure('message_too_large', 'Key 内容过长');
+      }
     }
     if ((type === 'import' || type === 'previewImport') && message.config != null) {
       if (!isRecord(message.config)) return failure('invalid_message', '导入配置格式无效');
@@ -188,6 +202,7 @@
     MAX_ID_LENGTH,
     MAX_RUN_ID_LENGTH,
     MAX_TEXT_BYTES,
+    MAX_KEY_BYTES,
     MAX_SITE_IDS,
     validateRuntimeMessage,
     validateRuntimeSender

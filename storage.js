@@ -523,14 +523,27 @@
       };
       if (ranMigration || needsNormalization) {
         // 迁移前保留一次原始快照，便于端口/Origin 解析出现问题时回滚。
+        // 站点与 meta 写入前必须 preflight；配额不足时整次取消，并撤销刚建的迁移备份。
+        let migrationBackupId = null;
         if (ranMigration && rawSites.length) {
-          await createSiteBackup(rawSites, 'before-schema-migration');
+          const backupInfo = await createSiteBackup(rawSites, 'before-schema-migration');
+          migrationBackupId = backupInfo?.id || null;
         }
         meta.updatedAt = Date.now();
         if (needsNormalization && !ranMigration) {
           meta.migratedAt = previous.migratedAt || Date.now();
         }
-        await chromeStorageSet({ [STORAGE_KEY]: sites, [SITE_DATA_META_KEY]: meta });
+        try {
+          await chromeStorageSet({
+            [STORAGE_KEY]: sites,
+            [SITE_DATA_META_KEY]: meta
+          }, { preflight: true });
+        } catch (error) {
+          if (migrationBackupId) {
+            try { await deleteSiteBackup(migrationBackupId); } catch (cleanupError) {}
+          }
+          throw error;
+        }
       }
       return {
         sites,

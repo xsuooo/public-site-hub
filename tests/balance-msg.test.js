@@ -35,6 +35,34 @@ test('privileged page and Key operations fail closed without an expected Origin'
   assert.equal((await balance.createTabApiKey(17, 'newapi', { expectedUserId: '1' })).code, 'expected_origin_required');
 });
 
+test('verifyNewApiTabAccount rejects nullish or stringified-null account identities', async () => {
+  const origin = 'https://account.example.com';
+  for (const session of [
+    { userId: null, token: 'session-token' },
+    { userId: undefined, token: 'session-token' },
+    { userId: 'null', token: 'session-token' },
+    { userId: 'undefined', token: 'session-token' },
+    null,
+    undefined
+  ]) {
+    const result = await tabApiKey.verifyNewApiTabAccount(17, session, origin);
+    assert.equal(result.ok, false, String(session));
+    assert.equal(result.code, 'account_identity_unavailable', String(session));
+  }
+});
+
+test('page-scrape inspectTokenList is total-aware for empty pages with positive total', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'page-scrape.js'), 'utf8');
+  // 注入脚本内的判定必须 total 感知，且与 tab-api-key.pickList 行为一致。
+  assert.match(source, /numericTotal === 0 \? 'empty' : 'with-tokens'/);
+  assert.match(source, /unknown-empty/);
+  assert.match(source, /tokenListState = inspected\.state/);
+  assert.doesNotMatch(
+    source,
+    /tokenListState = list\.length \? 'with-tokens' : 'empty'/
+  );
+});
+
 test('humanizeBalanceError maps common codes', () => {
   assert.match(balance.humanizeBalanceError('HTTP 401'), /未授权|登录|Key/);
   assert.match(balance.humanizeBalanceError('no balance field'), /余额/);

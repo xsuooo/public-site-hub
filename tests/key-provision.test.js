@@ -136,6 +136,24 @@ test('empty token list requires explicit allowCreate before creating a Key', asy
   assert.equal(h.getSites()[0].keys[0].key, 'sk-created-0123456789');
 });
 
+test('unknown-empty token list never offers or performs automatic creation', async () => {
+  const h = makeHarness({
+    scanResult: { keys: [], tokenListState: 'unknown-empty' }
+  });
+
+  const denied = await h.service.ensureSiteKey('site-1');
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, 'token_list_unknown-empty');
+  assert.equal(denied.needsCreateConfirm, undefined);
+  assert.equal(h.calls().createCalls, 0);
+
+  const forced = await h.service.ensureSiteKey('site-1', { allowCreate: true });
+  assert.equal(forced.ok, false);
+  assert.equal(forced.code, 'token_list_unknown-empty');
+  assert.equal(h.calls().createCalls, 0);
+  assert.equal(h.getSites()[0].keys.length, 0);
+});
+
 test('automatic provisioning creates exactly one Key only after a readable empty token list', async () => {
   const h = makeHarness({
     scanResult: { keys: [], tokenListState: 'empty' }
