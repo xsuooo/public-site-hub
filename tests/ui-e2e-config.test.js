@@ -18,6 +18,9 @@ test('Playwright UI gate is isolated, single-worker, and covers the approved sce
   assert.match(spec, /unable to derive extension ID/);
   assert.match(spec, /PROFILE_PREFIX = ['"]public-site-hub-ui-e2e-/);
   assert.match(spec, /chrome\.storage\.local\.clear/);
+  assert.match(spec, /migrateSiteData/);
+  assert.match(spec, /siteDataMeta/);
+  assert.match(spec, /UI fixture seed mismatch/);
   assert.match(spec, /prefers-color-scheme: dark/);
   assert.match(spec, /setViewportSize\(\{ width: 614, height: 819 \}\)/);
   assert.match(spec, /assertNoHorizontalOverflow/);

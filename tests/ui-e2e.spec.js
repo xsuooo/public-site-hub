@@ -64,7 +64,7 @@ function makeSite(index, health = 'healthy') {
     ? {
         balance: `$${(20 - (index % 10)).toFixed(2)}`,
         balanceUpdatedAt: now,
-        balanceStatus: { status: 'success', lastSuccessAt: now }
+        balanceStatus: { status: 'ok', lastSuccessAt: now }
       }
     : health === 'failed'
       ? {
@@ -136,10 +136,35 @@ async function launchScenario(name) {
     const match = worker.url().match(/^chrome-extension:\/\/([^/]+)\/background\.js$/);
     if (!match) throw new Error(`unable to derive extension ID from ${worker.url()}`);
 
+    // 启动迁移可能在空存储上写回 sites:[]；必须等它结束后再 seed，
+    // 并带上当前 schemaVersion，避免后续迁移再把夹具清空。
+    await worker.evaluate(async () => {
+      if (typeof migrateSiteData === 'function') await migrateSiteData();
+      if (typeof loadSiteBackups === 'function') await loadSiteBackups();
+    });
+
     const sites = scenarioSites(name);
     await worker.evaluate(async (payload) => {
       await chrome.storage.local.clear();
-      await chrome.storage.local.set(payload);
+      const schemaVersion = typeof SITE_DATA_SCHEMA_VERSION === 'number'
+        ? SITE_DATA_SCHEMA_VERSION
+        : 5;
+      const now = Date.now();
+      await chrome.storage.local.set({
+        ...payload,
+        siteDataMeta: {
+          schemaVersion,
+          updatedAt: now,
+          migratedAt: now
+        }
+      });
+      const stored = await chrome.storage.local.get(['sites']);
+      const count = Array.isArray(stored.sites) ? stored.sites.length : 0;
+      if (count !== payload.sites.length) {
+        throw new Error(
+          `UI fixture seed mismatch: expected ${payload.sites.length}, got ${count}`
+        );
+      }
     }, {
       sites,
       prefs: {
