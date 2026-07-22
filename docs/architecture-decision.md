@@ -38,9 +38,10 @@
 
 ## 后续工作
 
-1. **先关闭发布证据，不再扩大 rc.3 运行时范围。** 当前自动化已覆盖源码、包、Edge runtime 和 UI；真正阻断候选签署的是基于未来不可变 ZIP 的 Chrome/Edge 独立 profile 手工验收、权限弹窗、专用账号/Key 清理和验收记录。
-2. **下一开发周期抽出可注入的消息路由。** 保留 `message-contract.js` 和现有返回码，先把 `background.js` 的业务 `switch` 移到独立 router，让 Chrome 生命周期启动与业务处理可以分别测试；不要在 rc.3 发布前做这项加载图变更。
-3. **让前后台共同消费契约。** Popup/Options 目前仍以字符串调用 `send(type, payload)`；下一周期为 43 个消息补 JSDoc payload/response typedef 和构造器，并让 `ui-runtime` 在开发测试中校验发送载荷，避免只有接收端发现漂移。
-4. **增量引入静态检查，不直接迁移框架。** 先对消息契约、存储和余额编排启用 `tsc --allowJs --checkJs --noEmit`，稳定后再扩到其余模块；这能获得类型收益，同时不改变 MV3 classic service worker 的启动语义。
-5. **按风险补覆盖率。** 优先覆盖当前低覆盖且高风险的 `balance.js`、`detect.js`、`key-import.js` 和权限失败分支，并为 service worker 生命周期增加可观察断言；不以无差别追求统一百分比替代关键竞态、Origin 和凭据边界测试。
-6. **最后再评估 ESM/bundler。** 只有消息、存储 schema、发布包和浏览器验收都已有兼容回归门禁后，才分阶段迁移模块系统；React/Vue 仍不是当前 Popup/Options 复杂度下的必要依赖。
+1. **先关闭 rc.3 发布证据，不再扩大该候选运行时范围。** 源码标签与不可变 ZIP 已就绪；阻断签署的是 Chrome/Edge 独立 profile 手工验收、权限弹窗、专用账号/Key 清理和验收记录。验收只绑定冻结 ZIP，不绑定日常工作区。
+2. **权限 UX 增量（activeTab 免持久权限收藏、可撤销全站 HTTPS 授权）已停在分支 `rc4/permission-ux`，不得回写 `v1.0.0-rc.3`。** rc.3 签署完成后再以 `1.0.0-rc.4` 冻结该增量。
+3. **再下一开发周期抽出可注入的消息路由。** 保留 `message-contract.js` 和现有返回码，先把 `background.js` 的业务 `switch` 移到独立 router，让 Chrome 生命周期启动与业务处理可以分别测试；不要在当前 RC 签署前做这项加载图变更。
+4. **让前后台共同消费契约。** Popup/Options 目前仍以字符串调用 `send(type, payload)`；下一周期为 43 个消息补 JSDoc payload/response typedef 和构造器，并让 `ui-runtime` 在开发测试中校验发送载荷，避免只有接收端发现漂移。
+5. **增量引入静态检查，不直接迁移框架。** 先对消息契约、存储和余额编排启用 `tsc --allowJs --checkJs --noEmit`，稳定后再扩到其余模块；这能获得类型收益，同时不改变 MV3 classic service worker 的启动语义。
+6. **按风险补覆盖率。** 优先覆盖当前低覆盖且高风险的 `balance.js`、`detect.js`、`key-import.js` 和权限失败分支，并为 service worker 生命周期增加可观察断言；不以无差别追求统一百分比替代关键竞态、Origin 和凭据边界测试。
+7. **最后再评估 ESM/bundler。** 只有消息、存储 schema、发布包和浏览器验收都已有兼容回归门禁后，才分阶段迁移模块系统；React/Vue 仍不是当前 Popup/Options 复杂度下的必要依赖。

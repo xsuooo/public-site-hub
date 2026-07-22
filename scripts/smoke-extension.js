@@ -491,7 +491,7 @@ async function verifyPopup(client, extensionId, manifest, timeoutMs) {
       'Popup render',
       () => evaluate(client, page.sessionId, `(() => {
         const required = [
-          '.popup-shell', '#saveCurrent', '#refreshBalances', '#healthSummary',
+          '.popup-shell', '#saveCurrent', '#refreshBalances', '#healthSummary', '#grantAllSites',
           '#search', '#list', '#stopBalanceRefresh', '#deleteDialog', '#keyCreateDialog'
         ];
         const list = document.querySelector('#list');

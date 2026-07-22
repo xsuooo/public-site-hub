@@ -1,18 +1,20 @@
 # 1.0.0-rc.3 验收清单
 
-状态：自动化门禁已通过；源码尚未冻结，标签和不可变 ZIP 尚未生成
+状态：自动化门禁已通过；源码标签与不可变 ZIP 已生成；手工验收待执行
 
-本清单只能针对未来 `v1.0.0-rc.3` 对应提交及其不可变 ZIP 执行。当前源码目录和 `dist/` 不能代替候选制品。测试只使用专用账号和测试 Key，不得使用生产凭据。
+本清单只能针对 `v1.0.0-rc.3` 对应提交及其不可变 ZIP 执行。当前开发工作区、`dist/` 与任何未提交改动不能代替候选制品。测试只使用专用账号和测试 Key，不得使用生产凭据。
+
+制品与 attestation 位于 Git 外部目录（勿提交、勿用源码树 `dist/` 代替）。加载前核对 ZIP 的 SHA-256 与本清单及发布记录一致。
 
 ## 候选信息
 
-- 提交 SHA：待源码冻结后填写
-- Git 标签：`v1.0.0-rc.3`（待创建）
+- 提交 SHA：`a7d3b42311578b5bc87a1e36806c231025a44e99`
+- Git 标签：`v1.0.0-rc.3`
 - Manifest 版本：`0.99.0.3`
-- ZIP 文件：`public-site-hub-1.0.0-rc.3.zip`（待生成）
-- ZIP SHA-256：待生成
-- 外部 attestation：`public-site-hub-1.0.0-rc.3.attestation.json`（待生成）
-- 构建日期和执行人：待生成后填写
+- ZIP 文件：`public-site-hub-1.0.0-rc.3.zip`
+- ZIP SHA-256：`39b646965526f8b7222508009b532effa4f5183eaabb9dc4314c69f5749971b0`
+- 外部 attestation：`public-site-hub-1.0.0-rc.3.attestation.json`
+- 构建日期和执行人：`2026-07-21` / `xsu`
 
 ## 自动化与制品
 
@@ -23,9 +25,9 @@
 - [x] `npm run build` 和 `npm run verify:package` 通过，包只含 28 个 runtime 文件。
 - [x] `npm run verify:runtime -- --browser=edge` 在隔离 Edge 中通过，0 console errors。
 - [x] `npm run verify:ui` 通过 empty、single、mixed、hundred 四个场景。
-- [ ] 源码冻结提交已完成，工作树为空，`HEAD` 与注释标签提交完全一致。
-- [ ] `npm run release:artifact -- --out-dir <外部空目录>` 只在标签的干净 detached worktree 中运行。
-- [ ] 第二个全新 detached worktree 生成相同 ZIP SHA-256，sidecar 和 attestation 一致。
+- [x] 源码冻结提交已完成；候选源码以标签 `v1.0.0-rc.3` → `a7d3b42311578b5bc87a1e36806c231025a44e99` 为准（provenance 提交不改变标签绑定）。
+- [x] `npm run release:artifact -- --out-dir <外部空目录>` 只在标签的干净 detached worktree 中运行。
+- [x] 第二个全新 detached worktree 生成相同 ZIP SHA-256，sidecar 和 attestation 一致。
 - [ ] Chrome Stable 与 Edge Stable 都从新目录加载该 ZIP，service worker、Popup、Options 和控制台无错误。
 
 ## rc.3 新增加固
@@ -75,4 +77,4 @@
 - [ ] 测试凭据撤销、浏览器 profile 和临时导出清理责任人及期限已记录。
 - [ ] 测试者与维护者完成最终签署。
 
-最终结果：待候选制品生成和手工验收
+最终结果：制品已就绪；待 Chrome/Edge 手工验收与签署

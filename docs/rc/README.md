@@ -6,14 +6,15 @@
 
 - 用户版本：`1.0.0-rc.3`
 - Manifest 数字版本：`0.99.0.3`
-- Git 标签：`v1.0.0-rc.3`（待创建）
-- ZIP：`public-site-hub-1.0.0-rc.3.zip`（待生成）
-- SHA-256：`public-site-hub-1.0.0-rc.3.zip.sha256`（待生成）
-- 外部 attestation：`public-site-hub-1.0.0-rc.3.attestation.json`（待生成）
+- Git 标签：`v1.0.0-rc.3`（已创建，绑定候选源码提交；不得移动）
+- ZIP：`public-site-hub-1.0.0-rc.3.zip`（已生成，Git 外部不可变物）
+- SHA-256：见 [发布记录](rc-3-release-record.md) 与 `.zip.sha256` sidecar
+- 外部 attestation：`public-site-hub-1.0.0-rc.3.attestation.json`（已生成）
 - 支持浏览器：Chrome Stable、Edge Stable
 - 测试人数：**一人**；同一人覆盖双浏览器，使用相互独立的浏览器 profile 与专用测试账号/Key
 - 测试周期：推荐五天；至少保证 Chrome 与 Edge 各有完整主流程日与交叉冒烟
 - 数据边界：零遥测，只允许用户主动复制脱敏诊断
+- **验收绑定**：只加载上述版本化 ZIP；不得用日常开发目录、`dist/` 或任何含未进标签改动的解压目录代替
 
 更高候选版本必须继续使用新的编号。正式版 Manifest 使用 `1.0.0`，严格高于所有 `0.99.0.x` RC。不得覆盖、替换或重用已经分发的 RC 文件。
 

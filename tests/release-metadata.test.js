@@ -155,9 +155,24 @@ test('RC.3 documentation fixes immutable artifacts, single-tester dual-browser m
   assert.match(acceptance, /批量刷新可协作式停止并继续/);
   assert.match(feedback, /RC 版本：1\.0\.0-rc\.3/);
   assert.match(findings, /Chrome[\s\S]*Edge/);
-  assert.match(releaseRecord, /源码标签、不可变制品和手工签署待执行/);
-  assert.match(releaseRecord, /Git 标签：`v1\.0\.0-rc\.3`（待创建）/);
-  assert.doesNotMatch(releaseRecord, /SHA-256：[0-9a-f]{64}/i);
+  // 允许两种合法阶段：
+  // 1) 冻结前：标签“待创建”、制品摘要未写入；
+  // 2) 冻结后 provenance：标签已创建、SHA-256 已抄入，手工签署仍待执行。
+  assert.match(releaseRecord, /(?:源码标签、不可变制品和手工签署待执行|源码已冻结|手工签署待执行|开发加固完成)/);
+  const preFreeze = /Git 标签：`v1\.0\.0-rc\.3`（待创建）/.test(releaseRecord);
+  const postFreeze = /Git 标签：`v1\.0\.0-rc\.3`/.test(releaseRecord)
+    && /SHA-256：`[0-9a-f]{64}`/i.test(releaseRecord)
+    && /源码已冻结、标签已创建且未移动/.test(releaseRecord);
+  assert.ok(preFreeze || postFreeze,
+    'rc-3-release-record must be either pre-freeze placeholders or post-freeze provenance');
+  if (postFreeze) {
+    assert.match(releaseRecord, /候选提交 SHA：`[0-9a-f]{40}`/);
+    assert.match(releaseRecord, /public-site-hub-1\.0\.0-rc\.3\.zip/);
+    assert.match(releaseRecord, /Chrome \+ Edge 单人验收完成/);
+    assert.match(releaseRecord, /最终结论：.*手工验收/);
+  } else {
+    assert.doesNotMatch(releaseRecord, /SHA-256：`[0-9a-f]{64}`/i);
+  }
   assert.match(policy, /(?:永不覆盖|不覆盖)/);
   assert.match(policy, /`1\.0\.0-rc\.3`[\s\S]*`0\.99\.0\.3`/);
   assert.match(policy, /单人双浏览器/);
