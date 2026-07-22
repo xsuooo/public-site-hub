@@ -83,7 +83,7 @@ test('README documents permissions, local-only data and zero-telemetry RC bounda
     /完整导出[^\n]*完整 Key/,
     /存储配额[^\n]*不会部分覆盖/,
     /没有遥测/,
-    /不得使用生产账号或生产 Key/
+    /(?:不得|不要)(?:使用|用)生产账号或生产 Key/
   ]) {
     assert.match(readme, pattern);
   }
@@ -123,67 +123,22 @@ test('generated packages, profiles, inputs and external attestations stay out of
   }
 });
 
-test('RC.3 documentation fixes immutable artifacts, single-tester dual-browser matrix and release gates', () => {
-  const overview = read('docs/rc/README.md');
-  const matrix = read('docs/rc/rc-3-test-matrix.md');
-  const acceptance = read('docs/rc/rc-3-acceptance.md');
-  const feedback = read('docs/rc/rc-3-feedback-template.md');
-  const findings = read('docs/rc/rc-3-findings.md');
-  const releaseRecord = read('docs/rc/rc-3-release-record.md');
-  const policy = read('docs/rc/immutable-release-policy.md');
-  const cleanup = read('docs/rc/credential-cleanup.md');
+test('RC docs keep only the local fixture helper; no paper acceptance pack', () => {
+  const rcDir = path.join(root, 'docs', 'rc');
+  const names = fs.readdirSync(rcDir).sort();
+  assert.deepEqual(names, ['local-newapi-fixture.md']);
 
-  for (const pattern of [
-    /v1\.0\.0-rc\.3/,
-    /public-site-hub-1\.0\.0-rc\.3\.zip/,
-    /SHA-256/,
-    /Chrome Stable/,
-    /Edge Stable/,
-    /一人/,
-    /五天/,
-    /P0、P1 和阻断型 P2 均为零/
-  ]) {
-    assert.match(overview, pattern);
-  }
-  assert.match(matrix, /单人双浏览器/);
-  assert.match(matrix, /Chrome Stable[\s\S]*Edge Stable/);
-  assert.match(acceptance, /Manifest 版本：`0\.99\.0\.3`/);
-  assert.match(acceptance, /storage_quota_exceeded/);
-  assert.match(acceptance, /unknown_message/);
-  assert.match(acceptance, /untrusted_sender/);
-  assert.match(acceptance, /不包含 `cookies` 权限/);
-  assert.match(acceptance, /批量刷新可协作式停止并继续/);
-  assert.match(feedback, /RC 版本：1\.0\.0-rc\.3/);
-  assert.match(findings, /Chrome[\s\S]*Edge/);
-  // 允许两种合法阶段：
-  // 1) 冻结前：标签“待创建”、制品摘要未写入；
-  // 2) 冻结后 provenance：标签已创建、SHA-256 已抄入，手工签署仍待执行。
-  assert.match(releaseRecord, /(?:源码标签、不可变制品和手工签署待执行|源码已冻结|手工签署待执行|开发加固完成)/);
-  const preFreeze = /Git 标签：`v1\.0\.0-rc\.3`（待创建）/.test(releaseRecord);
-  const postFreeze = /Git 标签：`v1\.0\.0-rc\.3`/.test(releaseRecord)
-    && /SHA-256：`[0-9a-f]{64}`/i.test(releaseRecord)
-    && /源码已冻结、标签已创建且未移动/.test(releaseRecord);
-  assert.ok(preFreeze || postFreeze,
-    'rc-3-release-record must be either pre-freeze placeholders or post-freeze provenance');
-  if (postFreeze) {
-    assert.match(releaseRecord, /候选提交 SHA：`[0-9a-f]{40}`/);
-    assert.match(releaseRecord, /public-site-hub-1\.0\.0-rc\.3\.zip/);
-    assert.match(releaseRecord, /Chrome \+ Edge 单人验收完成/);
-    assert.match(releaseRecord, /最终结论：.*手工验收/);
-  } else {
-    assert.doesNotMatch(releaseRecord, /SHA-256：`[0-9a-f]{64}`/i);
-  }
-  assert.match(policy, /(?:永不覆盖|不覆盖)/);
-  assert.match(policy, /`1\.0\.0-rc\.3`[\s\S]*`0\.99\.0\.3`/);
-  assert.match(policy, /单人双浏览器/);
-  assert.match(cleanup, /撤销[\s\S]*Key/);
-  assert.match(cleanup, /Chrome profile[\s\S]*Edge profile/);
-  assert.match(overview, /外部 attestation/);
-  assert.match(overview, /注释标签/);
-  assert.match(overview, /标签后的记录提交/);
-  assert.match(overview, /Edge\/Chromium[\s\S]*Chrome Stable 和 Edge Stable[\s\S]*手工/);
-  assert.match(overview, /verify:runtime[\s\S]*verify:ui[\s\S]*Playwright/);
-  assert.doesNotMatch(changelog, /自动冒烟通过/);
-  assert.match(changelog, /自动冒烟必须通过/);
-  assert.match(changelog, /单名测试者必须[\s\S]*Chrome Stable[\s\S]*Edge Stable[\s\S]*交叉浏览器验收/);
+  const fixture = read('docs/rc/local-newapi-fixture.md');
+  assert.match(fixture, /npm run rc:fixture/);
+  assert.match(fixture, /127\.0\.0\.1:4173[1-4]/);
+  assert.match(fixture, /不使用任何外部账号/);
+
+  assert.equal(fs.existsSync(path.join(rcDir, 'rc-3-acceptance.md')), false);
+  assert.equal(fs.existsSync(path.join(rcDir, 'rc-3-release-record.md')), false);
+  assert.equal(fs.existsSync(path.join(rcDir, 'immutable-release-policy.md')), false);
+
+  assert.match(readme, /release:artifact/);
+  assert.match(readme, /local-newapi-fixture\.md/);
+  assert.doesNotMatch(readme, /rc-3-acceptance\.md/);
+  assert.doesNotMatch(readme, /问题台账/);
 });

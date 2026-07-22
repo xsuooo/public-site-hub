@@ -2,7 +2,7 @@
 
 公益站收藏是一个 Manifest V3 浏览器扩展，用于收藏公益或中转 API 站点、管理本地 Key、查看余额，以及导入或导出站点数据。
 
-当前候选是已冻结的 `1.0.0-rc.3`，面向**单名可信测试者**，须在 Chrome Stable 与 Edge Stable 上各用独立 profile 验收。它不是公开发布版本，也不得使用生产账号或生产 Key 验收。手工验收必须加载版本化 ZIP（见 [发布记录](docs/rc/rc-3-release-record.md)），不得用本仓库工作区或 `dist/` 代替。`1.0.0-rc.2` 的标签、ZIP 与验收资料保持不可变；标签后的权限 UX 增量在分支 `rc4/permission-ux`，不进入本候选。
+当前版本是 `1.0.0-rc.3`。它不是商店公开发布版；不要用生产账号或生产 Key 做联调。门禁以本仓库自动化命令为准；需要独立包时用标签 `v1.0.0-rc.3` 在干净 worktree 生成 ZIP。权限 UX 增量（全站授权等）在分支 `rc4/permission-ux`。
 
 ## 主要能力
 
@@ -18,19 +18,9 @@
 - 诊断页可查看并清理不再对应收藏站点的孤立 HTTPS 授权，复制内容不包含真实域名。
 - 手动复制脱敏诊断；项目不包含遥测、远程日志或自动上传。
 
-## RC 安装
+## 安装（开发者模式）
 
-测试者应收到版本化 ZIP、对应的 SHA-256 和外部 attestation，不应收到会被静默覆盖的固定文件名。
-
-rc.3 源码标签与不可变 ZIP 已生成。测试者应使用外部制品目录中的 ZIP，不要从本仓库临时构建验收。
-
-1. 校验 ZIP 的 SHA-256 与 [发布记录](docs/rc/rc-3-release-record.md) 一致（当前摘要见该文件）。
-2. 将 ZIP 解压到一个新的、版本独立的目录，不覆盖旧 RC，也不指向本仓库。
-3. 打开 `chrome://extensions` 或 `edge://extensions`。
-4. 启用开发者模式，选择“加载已解压的扩展程序”，加载刚解压的目录。
-5. 对照 [RC 验收清单](docs/rc/rc-3-acceptance.md) 与 [测试矩阵](docs/rc/rc-3-test-matrix.md) 记录浏览器版本、扩展版本和结果。
-
-从源码验收时先生成发布目录，再加载相对路径 `dist/`：
+从源码：
 
 ```powershell
 npm test
@@ -40,7 +30,11 @@ npm run verify:runtime
 npm run verify:ui
 ```
 
-`npm run verify:runtime` 是无账号、无 Key 的 Edge/Chromium 扩展上下文自动冒烟门禁。`npm run verify:ui` 另外使用 Playwright 的隔离 Edge profile，合成 empty、single、mixed、hundred 四种数据，检查 Popup/Options 的布局、筛选、排序、键盘、路由、深色模式和 125% 等效视口。品牌 Chrome Stable 需要按 RC 清单手工加载；真实授权、余额和 Key 流程仍需使用专用测试账号完成。
+然后在 `chrome://extensions` 或 `edge://extensions` 启用开发者模式，加载相对路径 `dist/`。
+
+从发布 ZIP：在干净 worktree 执行 `npm run release:artifact -- --out-dir <空目录>`，校验 `.sha256` 后解压到独立目录再加载；不要覆盖旧解压目录。
+
+`npm run verify:runtime` 是无账号、无 Key 的 Edge/Chromium 扩展上下文冒烟。`npm run verify:ui` 用隔离 profile 和合成数据检查 Popup/Options 布局与交互。真实站点权限、登录会话、Key 与余额仍需本机自测。
 
 ## 基本使用
 
@@ -95,26 +89,17 @@ npm run verify:ui
 
 扩展没有遥测、远程诊断、分析 SDK 或崩溃上报。诊断只能由用户主动复制，并必须排除完整 Key、Cookie、完整站点列表、备注、URL query/hash 和完整存储。
 
-## RC 发布资料
+## 文档与发布
 
-- [RC 流程总览](docs/rc/README.md)
-- [RC 验收清单](docs/rc/rc-3-acceptance.md)
-- [单人双浏览器测试矩阵](docs/rc/rc-3-test-matrix.md)
-- [问题反馈模板](docs/rc/rc-3-feedback-template.md)
-- [问题台账](docs/rc/rc-3-findings.md)
-- [发布记录](docs/rc/rc-3-release-record.md)
-- [凭据清理清单](docs/rc/credential-cleanup.md)
-- [不可变发布与撤回规则](docs/rc/immutable-release-policy.md)
 - [架构方案与当前选择](docs/architecture-decision.md)
 - [版本历史](CHANGELOG.md)
+- [本机 NewAPI 夹具](docs/rc/local-newapi-fixture.md)（无外部测试站时用）
 
-维护者只能在干净、正好指向版本注释标签的独立 worktree 中生成候选物：
+生成可分发 ZIP（须在干净、指向注释标签的 detached worktree 中执行；已有同名文件时拒绝覆盖）：
 
 ```powershell
 npm run release:artifact -- --out-dir ../public-site-hub-rc3-artifacts
 ```
-
-该命令会重新构建并校验 `dist/`，再生成确定性 ZIP、标准 `.sha256` sidecar 和 Git 外部 attestation；已有同名文件时会拒绝覆盖。完整的标签、复现和发布记录顺序以 [RC 流程总览](docs/rc/README.md) 为准。
 
 ## 已知限制
 
