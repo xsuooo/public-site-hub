@@ -109,9 +109,25 @@ function candidatePaths(kind) {
     : ['/usr/bin/chromium', '/usr/bin/chromium-browser'];
 }
 
+function playwrightChromiumPath() {
+  try {
+    // CI installs Playwright Chromium; prefer it when system Chromium is absent.
+    const { chromium } = require('@playwright/test');
+    const executable = chromium.executablePath();
+    return fs.statSync(executable, { throwIfNoEntry: false })?.isFile()
+      ? path.resolve(executable)
+      : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 function findNamedBrowser(kind) {
   const override = kind === 'edge' ? process.env.EDGE_PATH : process.env.CHROMIUM_PATH;
-  const executable = [override, ...candidatePaths(kind)]
+  const candidates = kind === 'chromium'
+    ? [override, playwrightChromiumPath(), ...candidatePaths(kind)]
+    : [override, ...candidatePaths(kind)];
+  const executable = candidates
     .filter(Boolean)
     .find((candidate) => fs.statSync(candidate, { throwIfNoEntry: false })?.isFile());
   return executable ? { kind, executable: path.resolve(executable) } : null;
@@ -281,6 +297,9 @@ async function launchBrowser(browser, extensionDir, headed, timeoutMs) {
     '--metrics-recording-only',
     '--disable-breakpad',
     '--disable-dev-shm-usage',
+    // GitHub Actions / container 里 Chromium 常以受限用户运行，无 sandbox 会卡住且不写 DevToolsActivePort。
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
     '--window-size=1280,900'
   ];
   if (!headed) args.push('--headless=new');
